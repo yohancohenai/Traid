@@ -1,0 +1,62 @@
+# TT Elite Quant Pro. Start: cp .env.example .env && docker compose up -d --build
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ttq}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-ttq}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ttq}"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+  api:
+    build: ./backend
+    env_file: .env
+    environment:
+      TTQ_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ttq}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ttq}
+      TTQ_REDIS_URL: redis://redis:6379/0
+      TTQ_ARTIFACTS_DIR: /app/artifacts
+    volumes: [artifacts:/app/artifacts]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_started}
+    ports: ["8000:8000"]
+    restart: unless-stopped
+  worker:
+    build: ./backend
+    env_file: .env
+    command: ["python", "-m", "ttq.worker"]
+    environment:
+      TTQ_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ttq}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ttq}
+      TTQ_REDIS_URL: redis://redis:6379/0
+      TTQ_ARTIFACTS_DIR: /app/artifacts
+    volumes: [artifacts:/app/artifacts]
+    depends_on:
+      api: {condition: service_healthy}
+    restart: unless-stopped
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports: ["3000:3000"]
+    depends_on: [api]
+    restart: unless-stopped
+  backup:
+    image: postgres:16
+    entrypoint: ["/scripts/backup.sh"]
+    environment:
+      PGURL: postgresql://${POSTGRES_USER:-ttq}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ttq}
+    volumes: [./backend/scripts:/scripts:ro, ./backups:/backups]
+    depends_on:
+      db: {condition: service_healthy}
+    restart: unless-stopped
+volumes:
+  pgdata:
+  artifacts:

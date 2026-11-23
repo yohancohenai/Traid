@@ -1,0 +1,12 @@
+.env
+backend/.env
+backend/artifacts/
+backups/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+frontend/node_modules/
+frontend/.next/
+frontend/test-results/
+frontend/playwright-report/
+catboost_info/
