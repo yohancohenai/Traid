@@ -52,13 +52,21 @@ if [ "${TTQ_LAN:-0}" = "1" ]; then export TTQ_BIND=0.0.0.0; else export TTQ_BIND
 # Pick free host ports: other apps on the Mac often use 8000 (the API port is only for debugging anyway).
 port_busy() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
 running_here() { docker compose ps --status running --services 2>/dev/null | grep -qx "$1"; }
+# Remember the chosen port in .env so updates reuse it (compose also reads .env).
+if [ -z "${TTQ_API_PORT:-}" ]; then
+  TTQ_API_PORT=$({ grep -E '^TTQ_API_PORT=' .env 2>/dev/null || true; } | tail -1 | cut -d= -f2)
+fi
+if [ -z "${TTQ_API_PORT:-}" ] && running_here api; then
+  TTQ_API_PORT=$({ docker compose port api 8000 2>/dev/null || true; } | awk -F: '{print $NF}')
+fi
 if [ -z "${TTQ_API_PORT:-}" ]; then
   TTQ_API_PORT=8000
-  if port_busy 8000 && ! running_here api; then
+  if port_busy 8000; then
     for p in 8011 8021 8031 8041; do port_busy "$p" || { TTQ_API_PORT=$p; break; }; done
   fi
-  export TTQ_API_PORT
 fi
+export TTQ_API_PORT
+grep -q '^TTQ_API_PORT=' .env 2>/dev/null || printf '\nTTQ_API_PORT=%s\n' "$TTQ_API_PORT" >> .env
 if port_busy 3000 && ! running_here frontend; then
   echo "Port 3000 is used by another program. Close it (see: lsof -nP -iTCP:3000 -sTCP:LISTEN) and re-run."
   exit 1
