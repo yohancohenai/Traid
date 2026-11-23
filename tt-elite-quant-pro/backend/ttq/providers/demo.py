@@ -45,6 +45,7 @@ class DemoWorld:
         self.anchor = anchor
         r = _rng(seed, "players")
         names = set()
+        self.n_days = max(HISTORY_DAYS, (datetime.now(timezone.utc) - anchor).days) + FUTURE_DAYS
         self.players = []
         while len(self.players) < N_PLAYERS:
             n = f"{r.choice(FIRST)} {r.choice(LAST)}"
@@ -59,13 +60,13 @@ class DemoWorld:
     def skill(self, i: int, day: int) -> float:
         if i not in self._skill_cache:
             r = _rng(self.seed, "walk", i)
-            steps = r.normal(0, 0.03, HISTORY_DAYS + FUTURE_DAYS + 5)
+            steps = r.normal(0, 0.03, self.n_days + 5)
             self._skill_cache[i] = self.players[i]["skill0"] + np.cumsum(steps)
         return float(self._skill_cache[i][day])
 
     def _generate(self):
         out = []
-        for day in range(HISTORY_DAYS + FUTURE_DAYS + 1):
+        for day in range(self.n_days + 1):
             r = _rng(self.seed, "day", day)
             active = [i for i, p in enumerate(self.players) if p["debut_day"] <= day]
             n_groups = 6
@@ -155,10 +156,28 @@ class DemoWorld:
 _WORLD: DemoWorld | None = None
 
 
+def persisted_anchor() -> datetime:
+    """The DEMO world's day-0 is stored once in app_settings so restarts never shift synthetic match ids."""
+    from ttq.core.db import session_scope
+    from ttq.models import AppSetting
+    with session_scope() as db:
+        row = db.get(AppSetting, "demo_world")
+        if row and row.value.get("anchor"):
+            return datetime.fromisoformat(row.value["anchor"])
+        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        anchor = today - timedelta(days=HISTORY_DAYS)
+        db.add(AppSetting(key="demo_world", value={"anchor": anchor.isoformat(), "seed": 7}))
+        return anchor
+
+
 def get_world(anchor: datetime | None = None) -> DemoWorld:
+    """Cached world; rebuilt when the anchor changes or a new UTC day starts (the world extends daily)."""
     global _WORLD
-    if _WORLD is None or (anchor is not None and _WORLD.anchor != anchor):
+    anchor = anchor or persisted_anchor()
+    today = datetime.now(timezone.utc).date()
+    if _WORLD is None or _WORLD.anchor != anchor or getattr(_WORLD, "built_on", None) != today:
         _WORLD = DemoWorld(anchor=anchor)
+        _WORLD.built_on = today
     return _WORLD
 
 
@@ -169,8 +188,12 @@ class DemoResultsProvider(ResultsProvider):
     verified = True
 
     def __init__(self, world: DemoWorld | None = None, clock=None):
-        self.world = world or get_world()
+        self._world = world
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+
+    @property
+    def world(self):
+        return self._world or get_world()
 
     def fetch_matches(self, since, until):
         now = self.clock()
@@ -204,8 +227,12 @@ class DemoOddsProvider(OddsProvider):
     BOOKS = {"hardrock": (0.065, 1.0), "draftkings": (0.055, 0.9)}
 
     def __init__(self, world: DemoWorld | None = None, clock=None):
-        self.world = world or get_world()
+        self._world = world
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+
+    @property
+    def world(self):
+        return self._world or get_world()
 
     def quotes_for(self, m, at: datetime, opening=False) -> list[ProviderQuote]:
         A, B = self.world.players[m["a"]], self.world.players[m["b"]]
