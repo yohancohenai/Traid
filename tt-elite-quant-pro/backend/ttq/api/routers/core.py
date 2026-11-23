@@ -395,6 +395,32 @@ def manual_quote(items: list[ManualQuote], db: Session = Depends(get_db), user: 
     return {"stored": out, "warnings": warnings}
 
 
+@router.post("/odds/screenshot")
+async def odds_screenshot(file: UploadFile, demo: bool = False, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    """Read a Hard Rock table-tennis list screenshot with local OCR and propose prices. Saves NO quotes: the user
+    confirms rows in the UI, which then posts them to /api/odds/manual."""
+    import hashlib
+    from ttq.ocr.hardrock import OcrUnavailable, ocr_rows, pair_matches, parse_rows, propose
+    from ttq.services.ingest import save_raw
+    data = await file.read()
+    if not data or len(data) > 15_000_000:
+        raise HTTPException(422, "upload an image under 15 MB")
+    try:
+        rows, text = ocr_rows(data)
+    except OcrUnavailable as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:  # noqa
+        raise HTTPException(422, f"could not read the image: {e.__class__.__name__}")
+    pairs = pair_matches(parse_rows(rows))
+    proposals = propose(db, pairs, demo)
+    save_raw(db, "hr_screenshot", f"upload:{file.filename}",
+             {"sha256": hashlib.sha256(data).hexdigest(), "ocr_text": text, "proposals": len(proposals)}, demo)
+    audit(db, user, "hr_screenshot_read", "odds_quote", None, proposals=len(proposals))
+    db.commit()
+    return {"read_at": iso(utcnow()), "proposals": proposals, "ocr_text": text,
+            "note": "Nothing has been saved. Check every row against the Hard Rock app, fix anything wrong, then save."}
+
+
 @router.post("/odds/import-csv")
 async def import_odds_csv(file: UploadFile, db: Session = Depends(get_db), user: str = Depends(current_user)):
     text = (await file.read()).decode("utf-8-sig")

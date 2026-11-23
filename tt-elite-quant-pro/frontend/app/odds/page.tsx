@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { CsvUpload, ManualOddsEntry } from "@/components/odds-entry";
+import { ScreenshotImport } from "@/components/screenshot-import";
 import { Card, DemoBadge, DraftKingsNote, Empty, ErrorBox, FreshnessBadge, Loading, PageHeader, TableWrap, Time } from "@/components/ui";
 import { useApp } from "@/lib/app-context";
 import { american } from "@/lib/format";
@@ -67,6 +68,7 @@ export default function OddsIndexPage() {
           )}
         </Card>
         <div className="space-y-3">
+          <ScreenshotImport onStored={reload} />
           <ManualOddsEntry onStored={reload} />
           <CsvUpload
             title="Odds CSV import"

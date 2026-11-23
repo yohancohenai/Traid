@@ -1,4 +1,6 @@
-# Deploying TT Elite Quant Pro (VPS + your domain)
+# Deploying TT Elite Quant Pro on a VPS (optional)
+
+> Not required: the free way is to run it on your Mac. See [MAC.md](MAC.md).
 
 ## Buy
 * **VPS:** Hetzner Cloud CX22 (2 vCPU, 4 GB RAM, Ubuntu 24.04), about €5/month. A DigitalOcean 4 GB droplet also works.

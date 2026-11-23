@@ -35,7 +35,7 @@ if [ ! -f .env ]; then
   sed -i "s|^TTQ_JWT_SECRET=.*|TTQ_JWT_SECRET=$(rnd 64)|" .env
   sed -i "s|^TTQ_ENV=.*|TTQ_ENV=production|" .env
   sed -i "s|^TTQ_CORS_ORIGINS=.*|TTQ_CORS_ORIGINS=https://$DOMAIN|" .env
-  sed -i "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=https://$DOMAIN|" .env
+  sed -i "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=|" .env   # same-origin /api via the frontend proxy
   echo "TTQ_DOMAIN=$DOMAIN" >> .env
   chmod 600 .env
   echo "==> Building images"

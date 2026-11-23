@@ -19,10 +19,15 @@ record the bets you actually place. It tracks results, settlement, P/L and bankr
 ## Data status
 * **Results and schedule:** official, from www.tt-series.com (the TT Elite Series organiser's public site), polled politely.
   On a fresh install, run `python -m ttq.cli backfill-ttseries --from-id 1`, then `python -m ttq.cli train-force --live`.
-* **Hard Rock odds:** manual entry (Odds Comparison → Manual entry). There is no public Hard Rock API.
+* **Hard Rock odds:** upload a screenshot of the Hard Rock TT Elite list (free local OCR, you confirm each row), or type them in. There is no public Hard Rock API.
 * **DEMO:** a separate synthetic world for trying the app. It is labelled DEMO everywhere and never mixed with live data.
 
-## Quick start (Docker)
+## Quick start on a Mac (free): see [deploy/MAC.md](deploy/MAC.md)
+```bash
+./deploy/mac-start.sh            # Docker Desktop required; prints your login on first run
+```
+
+## Quick start (Docker, generic)
 ```bash
 cp .env.example .env            # set POSTGRES_PASSWORD, TTQ_JWT_SECRET, admin password
 docker compose up -d --build    # db, redis, api :8000, worker, frontend :3000, backup

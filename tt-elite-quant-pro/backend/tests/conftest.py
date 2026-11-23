@@ -39,7 +39,8 @@ def client(db):
     from fastapi.testclient import TestClient
     from ttq.main import app
     c = TestClient(app)
-    tok = c.post("/api/auth/login", json={"username": "admin", "password": "change-me"}).json()["access_token"]
+    from ttq.core.security import create_token
+    tok = create_token("admin")  # mint directly: logging in per test would trip the login rate limit
     c.headers["Authorization"] = f"Bearer {tok}"
     return c
 

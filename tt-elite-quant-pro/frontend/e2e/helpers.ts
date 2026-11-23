@@ -20,7 +20,7 @@ export async function ensureDemo(page: Page) {
 
 /** Wait for the opportunities page to finish loading (cards or the empty state). */
 export async function waitForOpportunities(page: Page) {
-  await expect(page.getByTestId("opportunity-card").first().or(page.getByTestId("no-qualifying"))).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("opportunity-card").first().or(page.getByTestId("no-qualifying")).first()).toBeVisible({ timeout: 30_000 });
 }
 
 /** Submit the BET PLACED modal, answering the duplicate (409) and risk-limit (422) prompts if they appear. */

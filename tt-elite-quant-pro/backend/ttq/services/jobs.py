@@ -54,11 +54,32 @@ def complete_tournament_refs(db: Session, source_key: str) -> set[str]:
     return {ref for ref, n, open_ in rows if n and not open_}
 
 
+def catch_up_ttseries(db: Session, max_gap_hours: float = 24, overlap_ids: int = 30, backfill=None) -> dict | None:
+    """After downtime (e.g. the Mac was off), the 2-page list window can miss tournaments. Resume the id walk from just
+    before the newest known tournament; complete tournaments are skipped, so only missing pages are fetched."""
+    src = db.scalar(select(DataSource).where(DataSource.key == "ttseries"))
+    if src is None or src.last_success_at is None:
+        return None
+    if (utcnow() - as_utc(src.last_success_at)).total_seconds() < max_gap_hours * 3600:
+        return None
+    from ttq.models import Tournament
+    refs = db.scalars(select(Tournament.source_ref).where(Tournament.source_key == "ttseries")).all()
+    ids = [int(r.split("-")[1]) for r in refs if r.startswith("tts-") and r.split("-")[1].isdigit()]
+    if not ids:
+        return None
+    start = max(1, max(ids) - overlap_ids)
+    log.info(f"ttseries catch-up after downtime: backfilling from tournament {start}")
+    return (backfill or backfill_ttseries)(start)
+
+
 def ingest_results_job(db: Session) -> dict:
     now = utcnow()
     out = {}
     for p in results_providers():
         if p.key == "ttseries":
+            caught_up = catch_up_ttseries(db)
+            if caught_up:
+                out["ttseries_catch_up"] = caught_up
             p.skip_refs = complete_tournament_refs(db, "ttseries")
             out[p.key] = ingest.ingest_results(db, p, now - timedelta(days=1), now + timedelta(days=2))
         else:

@@ -1,4 +1,6 @@
-export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+/** Empty = same origin (proxied by the Next server, see next.config.ts). Set NEXT_PUBLIC_API_URL only to call an
+ * API on another origin directly. */
+export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 
 const TOKEN_KEY = "ttq.token";
 
@@ -52,7 +54,8 @@ export function detailMessage(detail: unknown, fallback = "Request failed"): str
 type Query = Record<string, string | number | boolean | null | undefined>;
 
 export function buildUrl(path: string, query?: Query): string {
-  const u = new URL(API_BASE + path);
+  const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+  const u = new URL(API_BASE + path, origin);
   if (query) {
     for (const [k, v] of Object.entries(query)) {
       if (v !== undefined && v !== null && v !== "") u.searchParams.set(k, String(v));
@@ -93,7 +96,7 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
     res = await fetch(buildUrl(path, opts.query), { method: opts.method || (body ? "POST" : "GET"), headers, body, signal: opts.signal });
   } catch (e) {
     if ((e as Error).name === "AbortError") throw e;
-    throw new ApiError(0, null, `Cannot reach the API at ${API_BASE}. Is the backend running?`);
+    throw new ApiError(0, null, `Cannot reach the API${API_BASE ? ` at ${API_BASE}` : ""}. Is the backend running?`);
   }
   if (res.status === 401 && !path.startsWith("/api/auth/")) {
     onUnauthorized();
