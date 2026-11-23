@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0b1020;
+  --color-panel: #111827;
+  --color-panel2: #0f172a;
+  --color-line: #1f2a3c;
+  --color-line2: #2a3850;
+  --color-ink: #e5e9f0;
+  --color-sub: #94a3b8;
+  --color-dim: #64748b;
+  --color-accent: #38bdf8;
+  --color-pos: #22c55e;
+  --color-neg: #ef4444;
+  --color-warn: #f59e0b;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html, body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.num { font-variant-numeric: tabular-nums; }
+
+/* dense data tables */
+.tbl { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.tbl th { text-align: left; font-weight: 500; color: var(--color-sub); font-size: 11px; text-transform: uppercase;
+  letter-spacing: .04em; padding: 6px 8px; border-bottom: 1px solid var(--color-line); white-space: nowrap; background: var(--color-panel); position: sticky; top: 0; }
+.tbl td { padding: 5px 8px; border-bottom: 1px solid var(--color-line); white-space: nowrap; vertical-align: middle; }
+.tbl tbody tr:hover { background: rgba(56, 189, 248, .04); }
+.tbl td.r, .tbl th.r { text-align: right; }
+
+.inp { background: var(--color-panel2); border: 1px solid var(--color-line2); border-radius: 6px; padding: 5px 8px; color: var(--color-ink);
+  font-size: 13px; outline: none; min-width: 0; }
+.inp:focus { border-color: var(--color-accent); }
+.lbl { display: block; font-size: 11px; color: var(--color-sub); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 6px; padding: 5px 11px; font-size: 12px; font-weight: 600;
+  letter-spacing: .02em; border: 1px solid var(--color-line2); background: #172033; color: var(--color-ink); cursor: pointer; white-space: nowrap; }
+.btn:hover:not(:disabled) { border-color: var(--color-accent); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary { background: #0c4a6e; border-color: #0369a1; }
+.btn-primary:hover:not(:disabled) { background: #075985; }
+.btn-danger { background: #3f1d1d; border-color: #7f1d1d; }
+.btn-ghost { background: transparent; }
+
+::-webkit-scrollbar { height: 8px; width: 8px; }
+::-webkit-scrollbar-thumb { background: #253248; border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
