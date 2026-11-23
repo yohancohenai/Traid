@@ -9,7 +9,7 @@ record the bets you actually place. It tracks results, settlement, P/L and bankr
 > is not a guarantee of profit. When evidence is insufficient the app says **NO QUALIFYING BETS FOUND.**
 > If gambling stops being fun: 1-800-GAMBLER.
 
-**Read first:** [docs/LIMITATIONS.md](docs/LIMITATIONS.md) · [docs/DATA_PROVIDERS.md](docs/DATA_PROVIDERS.md) ·
+**Run 24/7 for free:** [deploy/ORACLE.md](deploy/ORACLE.md) · **Read first:** [docs/LIMITATIONS.md](docs/LIMITATIONS.md) · [docs/DATA_PROVIDERS.md](docs/DATA_PROVIDERS.md) ·
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/RUNBOOK.md](docs/RUNBOOK.md)
 
 ## Screenshots (DEMO mode)
