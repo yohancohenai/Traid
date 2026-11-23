@@ -125,3 +125,30 @@ def test_http_errors_raise_unavailable():
                                 rate=RateLimiter(0))
     with pytest.raises(ProviderUnavailable):
         p.get("/tournaments/")
+
+
+def test_ensure_source_survives_concurrent_create(engine):
+    """Worker and backfill both create the 'ttseries' source at startup: the loser must not crash."""
+    from sqlalchemy import text
+    from ttq.core import db as dbmod
+    from ttq.models import DataSource
+    from ttq.services.ingest import ensure_source
+    with engine.begin() as c:
+        c.execute(text("TRUNCATE data_sources RESTART IDENTITY CASCADE"))
+    a, b = dbmod.SessionLocal(), dbmod.SessionLocal()
+    try:
+        assert b.query(DataSource).count() == 0          # b's view: source does not exist yet
+        ensure_source(a, "ttseries", "x", "results", False)
+        a.commit()                                       # a wins the race
+        real_scalar, calls = b.scalar, []
+
+        def stale_first_lookup(*args, **kw):   # b looked before a committed (the real race)
+            calls.append(1)
+            return None if len(calls) == 1 else real_scalar(*args, **kw)
+        b.scalar = stale_first_lookup
+        s = ensure_source(b, "ttseries", "x", "results", False)   # b inserts -> conflict -> re-reads
+        assert len(calls) == 2
+        b.commit()
+        assert s.key == "ttseries" and b.query(DataSource).count() == 1
+    finally:
+        a.close(); b.close()

@@ -31,11 +31,17 @@ def save_raw(db: Session, source_key: str, endpoint: str, payload, is_demo: bool
 
 
 def ensure_source(db: Session, key: str, name: str, kind: str, is_demo: bool) -> DataSource:
+    """Get-or-create, safe when two processes (worker + backfill) create the same source at the same moment."""
+    from sqlalchemy.exc import IntegrityError
     s = db.scalar(select(DataSource).where(DataSource.key == key))
-    if not s:
-        s = DataSource(key=key, name=name, kind=kind, is_demo=is_demo)
-        db.add(s)
-        db.flush()
+    if s:
+        return s
+    try:
+        with db.begin_nested():
+            s = DataSource(key=key, name=name, kind=kind, is_demo=is_demo)
+            db.add(s)
+    except IntegrityError:
+        s = db.scalar(select(DataSource).where(DataSource.key == key))
     return s
 
 
