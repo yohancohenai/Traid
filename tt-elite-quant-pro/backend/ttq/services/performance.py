@@ -54,7 +54,8 @@ def summary(db: Session, is_demo: bool) -> dict:
     graded = [b for b in settled if b["status"] in ("WON", "LOST")]
     wagered = sum(b["stake"] for b in bs if b["status"] != "VOID")
     settled_wagered = sum(b["stake"] for b in settled if b["status"] != "VOID")
-    returned = sum(b["stake"] + (b["net"] or 0) for b in settled)
+    # Same basis as wagered: void refunds are neither wagered nor returned
+    returned = sum(b["stake"] + (b["net"] or 0) for b in settled if b["status"] != "VOID")
     net = sum(b["net"] or 0 for b in settled)
     pending = [b for b in bs if b["status"] in ("PLACED", "PENDING_RESULT", "SETTLEMENT_REVIEW")]
     txs = db.execute(select(BankrollTransaction).where(BankrollTransaction.is_demo == is_demo)

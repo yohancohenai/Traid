@@ -7,7 +7,7 @@ from ttq.core.config import get_settings
 from ttq.core.timeutil import as_utc, utcnow
 from ttq.models import Match, OddsQuote, Player, Prediction, Recommendation
 from ttq.odds.math import decimal_to_american
-from ttq.services.scanner import is_executable, observed_at, quote_status
+from ttq.services.scanner import effective_max_age, is_executable, observed_at, quote_status
 
 
 def iso(dt):
@@ -59,11 +59,12 @@ def pred_out(p: Prediction | None) -> dict | None:
 def rec_out(db: Session, r: Recommendation) -> dict:
     m = db.get(Match, r.match_id)
     q = db.get(OddsQuote, r.quote_id) if r.quote_id else None
+    qo = quote_out(q, m, effective_max_age(db)) if q else None
     sel_name = m.player1.canonical_name if r.selection == "p1" else m.player2.canonical_name if r.selection == "p2" else r.selection
     return {"id": r.id, "match": match_brief(m), "market": r.market, "selection": r.selection, "selection_name": sel_name,
             "line": r.line, "sportsbook": "Hard Rock Bet", "decimal_odds": r.decimal_odds,
             "american_odds": decimal_to_american(r.decimal_odds) if r.decimal_odds else None,
-            "quote": quote_out(q, m) if q else None, "quote_status": quote_out(q, m)["freshness"] if q else "UNAVAILABLE",
+            "quote": qo, "quote_status": qo["freshness"] if qo else "UNAVAILABLE",
             "model_prob": r.model_prob, "prob_interval": [r.prob_low, r.prob_high],
             "break_even": (1 / r.decimal_odds) if r.decimal_odds else None, "ev": r.ev, "ev_low": r.ev_low, "edge": r.edge,
             "novig_prob": r.novig_prob,
@@ -71,7 +72,7 @@ def rec_out(db: Session, r: Recommendation) -> dict:
             "data_quality": r.data_quality, "model_agreement": r.model_agreement, "reasons_for": r.reasons_for,
             "reasons_against": r.reasons_against, "filters": r.filter_results,
             # A recommendation can only QUALIFY while its quote is still fresh at read time
-            "status": ("WATCH" if r.status == "QUALIFIES" and (not q or quote_out(q, m)["freshness"] != "VERIFIED") else r.status),
+            "status": ("WATCH" if r.status == "QUALIFIES" and (not qo or qo["freshness"] != "VERIFIED") else r.status),
             "status_at_scan": r.status,
             "user_action": r.user_action, "created_at": iso(r.created_at), "is_demo": r.is_demo,
             "hypothetical_result": r.hypothetical_result}

@@ -2,10 +2,12 @@
 is unambiguous; everything else goes to SETTLEMENT_REVIEW. Results are never invented."""
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ttq.core.timeutil import utcnow
+from ttq.core.timeutil import as_utc, utcnow
 from ttq.models import BankrollTransaction, Bet, Match, OddsQuote, Recommendation, SettlementProposal
 from ttq.odds.math import clv, profit_for_result
 from ttq.services.audit import audit
@@ -27,9 +29,11 @@ def grade(m: Match, market: str, selection: str, line: float | None) -> tuple[st
         return ("WON" if won else "LOST"), "HIGH", f"Final set score {a}-{b}."
     if market == "correct_score":
         return ("WON" if selection == f"{a}-{b}" else "LOST"), "HIGH", f"Final set score {a}-{b}."
+    if market in ("set_handicap", "total_points", "point_handicap") and line is None:
+        return None, "LOW", f"{market} bet has no line recorded; correct the bet or settle manually."
     if market == "set_handicap":
         diff = (a - b) if selection == "p1" else (b - a)
-        v = diff + (line or 0)
+        v = diff + line
         return ("WON" if v > 0 else "LOST" if v < 0 else "PUSH"), "HIGH", f"Set diff {diff:+d} with line {line:+}."
     if market in ("total_points", "point_handicap"):
         pts = [(s.p1_points, s.p2_points) for s in m.sets]
@@ -40,7 +44,7 @@ def grade(m: Match, market: str, selection: str, line: float | None) -> tuple[st
             v = (tot - line) if selection == "over" else (line - tot)
             return ("WON" if v > 0 else "LOST" if v < 0 else "PUSH"), "HIGH", f"Total points {tot} vs {line}."
         mar = sum(x - y for x, y in pts) * (1 if selection == "p1" else -1)
-        v = mar + (line or 0)
+        v = mar + line
         return ("WON" if v > 0 else "LOST" if v < 0 else "PUSH"), "HIGH", f"Point margin {mar:+d} with line {line:+}."
     return None, "LOW", f"Unsupported market {market}."
 
@@ -69,16 +73,30 @@ def closing_for(db: Session, b: Bet) -> float | None:
 
 
 def settle_open_bets(db: Session, actor: str = "system") -> dict:
-    out = {"applied": 0, "review": 0, "waiting": 0}
-    bets = db.scalars(select(Bet).where(Bet.status.in_(["PLACED", "PENDING_RESULT"]))).all()
+    """Rows are locked FOR UPDATE SKIP LOCKED so concurrent runs can never settle (and pay) the same bet twice.
+    Each bet is graded inside its own savepoint so one bad bet cannot block the others."""
+    out = {"applied": 0, "review": 0, "waiting": 0, "errors": 0}
+    bets = db.scalars(select(Bet).where(Bet.status.in_(["PLACED", "PENDING_RESULT"]))
+                      .with_for_update(skip_locked=True)).all()
     for b in bets:
+        try:
+            with db.begin_nested():
+                _settle_one(db, b, actor, out)
+        except Exception:  # noqa
+            logging.getLogger(__name__).exception("settlement failed", extra={"bet_id": b.id})
+            out["errors"] += 1
+    return out
+
+
+def _settle_one(db: Session, b: Bet, actor: str, out: dict):
+    if True:
         m = db.get(Match, b.match_id)
-        if m.status in ("LIVE",) or (m.status == "SCHEDULED" and m.scheduled_at <= utcnow()):
+        if m.status in ("LIVE",) or (m.status == "SCHEDULED" and as_utc(m.scheduled_at) <= utcnow()):
             b.status = "PENDING_RESULT"
         result, conf, reason = grade(m, b.market, b.selection, b.line)
         if result is None and m.status not in ("FINISHED",):
             out["waiting"] += 1
-            continue
+            return
         net = profit_for_result(float(b.stake), float(b.accepted_decimal), result) if result else None
         prop = SettlementProposal(bet_id=b.id, proposed_status=result or "UNKNOWN", proposed_net_profit=net,
                                   confidence=conf, evidence={"match_status": m.status, "sets": [m.sets_p1, m.sets_p2],
@@ -97,11 +115,10 @@ def settle_open_bets(db: Session, actor: str = "system") -> dict:
             b.status = "SETTLEMENT_REVIEW"
             prop.state, prop.review_reason = "REVIEW", reason
             out["review"] += 1
-    return out
 
 
 def resolve_review(db: Session, bet_id: int, result: str, actor: str, note: str | None = None) -> Bet:
-    b = db.get(Bet, bet_id)
+    b = db.get(Bet, bet_id, with_for_update=True, populate_existing=True)  # lock: double submits cannot pay twice
     if not b or b.status != "SETTLEMENT_REVIEW":
         raise ValueError("bet is not awaiting settlement review")
     if result not in ("WON", "LOST", "PUSH", "VOID"):

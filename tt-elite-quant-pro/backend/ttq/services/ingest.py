@@ -203,6 +203,8 @@ def ingest_odds(db: Session, provider: OddsProvider, now: datetime | None = None
                          .order_by(OddsQuote.captured_at.desc()).limit(1))
         if prev and prev.american == am and prev.availability == q.availability and prev.source_key == provider.key:
             prev.last_confirmed_at = now  # unchanged price re-observed: refresh freshness, keep history compact
+            if q.quoted_at and (prev.quoted_at is None or as_utc(q.quoted_at) > as_utc(prev.quoted_at)):
+                prev.quoted_at = as_utc(q.quoted_at)
             stored += 1
             continue
         db.add(OddsQuote(match_id=m.id, bookmaker_key=q.bookmaker_key, market=q.market, selection=q.selection,

@@ -85,6 +85,8 @@ def confirm_bet(db: Session, *, actor: str, match_id: int, market: str, selectio
         if accepted_decimal <= 1.0:
             raise BetError("decimal odds must be > 1")
         dec, accepted_american = accepted_decimal, decimal_to_american(accepted_decimal)
+    if market in ("set_handicap", "point_handicap", "total_points") and line is None:
+        raise BetError(f"a line is required for {market}")
     if selection not in ("p1", "p2") and market == "match_winner":
         raise BetError("selection must be p1 or p2 for match winner")
     placed_at = as_utc(placed_at) or utcnow()
@@ -93,6 +95,8 @@ def confirm_bet(db: Session, *, actor: str, match_id: int, market: str, selectio
     rec = db.get(Recommendation, recommendation_id) if recommendation_id else None
     if recommendation_id and not rec:
         raise BetError("recommendation not found", 404)
+    if rec and (rec.match_id != match_id or rec.market != market or rec.selection != selection or rec.line != line):
+        raise BetError("bet does not match the linked recommendation (match, market, selection or line differ)")
     # Duplicate protection
     if bet_ref:
         key = f"ref:{bookmaker_key}:{bet_ref.strip()}"
@@ -147,7 +151,7 @@ EDITABLE = {"accepted_american", "stake", "placed_at", "bet_ref", "notes", "sele
 
 
 def correct_bet(db: Session, bet_id: int, changes: dict, reason: str, actor: str) -> dict:
-    b = db.get(Bet, bet_id)
+    b = db.get(Bet, bet_id, with_for_update=True, populate_existing=True)
     if not b:
         raise BetError("bet not found", 404)
     if not reason or len(reason.strip()) < 3:
@@ -168,6 +172,15 @@ def correct_bet(db: Session, bet_id: int, changes: dict, reason: str, actor: str
             b.stake = round(float(v), 2)
         elif k == "placed_at":
             b.placed_at = as_utc(datetime.fromisoformat(v) if isinstance(v, str) else v)
+        elif k == "bet_ref":
+            ref = (v or "").strip() or None
+            if ref:
+                key = f"ref:{b.bookmaker_key}:{ref}"
+                other = db.scalar(select(Bet).where(Bet.dedupe_key == key, Bet.id != b.id))
+                if other:
+                    raise BetError("another bet already uses this bet slip reference", 409, {"existing_bet_id": other.id})
+                b.dedupe_key = key
+            b.bet_ref = ref
         elif k == "status":
             if v not in ("PLACED", "PENDING_RESULT", "WON", "LOST", "PUSH", "VOID", "SETTLEMENT_REVIEW"):
                 raise BetError("invalid status")

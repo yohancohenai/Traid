@@ -46,8 +46,15 @@ def is_executable(book_key: str, region: str | None = None) -> bool:
 
 
 def observed_at(q: OddsQuote):
-    """Most recent time this exact price was observed at the source."""
-    return max(as_utc(q.captured_at), as_utc(q.last_confirmed_at)) if q.last_confirmed_at else as_utc(q.captured_at)
+    """Conservative freshness time: the latest time WE observed this price, but never later than the provider's own
+    quote timestamp (a cached provider price re-served to us is not fresh)."""
+    ours = max(as_utc(q.captured_at), as_utc(q.last_confirmed_at)) if q.last_confirmed_at else as_utc(q.captured_at)
+    return min(ours, as_utc(q.quoted_at)) if q.quoted_at else ours
+
+
+def effective_max_age(db) -> int:
+    from ttq.services.app_settings import get_setting
+    return min(get_setting(db, "filters")["max_quote_age_seconds"], get_settings().max_quote_age_seconds)
 
 
 def quote_status(q: OddsQuote | None, m: Match, max_age: int, now=None) -> str:
@@ -179,7 +186,7 @@ def scan(db: Session, is_demo: bool | None = None, now=None) -> dict:
             lo, hi = (pred.p1_ci_low, pred.p1_ci_high) if side == "p1" else (1 - pred.p1_ci_high, 1 - pred.p1_ci_low)
             comps = [v if side == "p1" else 1 - v for v in (pred.component_probs or {}).values()] or [p]
             spread = max(comps) - min(comps)
-            qstat = quote_status(qt, m, min(F["max_quote_age_seconds"], get_settings().max_quote_age_seconds), now)
+            qstat = quote_status(qt, m, effective_max_age(db), now)
             dec = float(qt.decimal_odds) if qt else None
             novig = hr_nv[idx] if hr_nv else None
             st, checks, ev, ev_low = evaluate(p, lo, hi, dec, novig, pred.data_quality, qstat, n_min, spread, F)
