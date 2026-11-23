@@ -139,14 +139,11 @@ def predict_scan_job(db: Session) -> dict:
         res = scanner.scan(db, is_demo)
         out[f"scan_{tag}"] = {k: v for k, v in res.items() if k != "new_qualifiers"}
         for rid in res["new_qualifiers"]:
+            from ttq.services.messages import recommendation_text
             r = db.get(Recommendation, rid)
-            m = db.get(Match, r.match_id)
-            raise_alert(db, "opportunity", f"Qualifying research opportunity: match {m.id}",
-                        f"{m.player1.canonical_name} vs {m.player2.canonical_name} ({m.scheduled_at:%Y-%m-%d %H:%M} UTC)\n"
-                        f"Selection {r.selection} @ Hard Rock {r.decimal_odds:.2f} (verified quote captured at "
-                        f"{scanner.observed_at(db.get(OddsQuote, r.quote_id)):%H:%M:%S} UTC). Est. EV {r.ev:+.1%}, model {r.model_prob:.1%}.\n"
-                        f"Re-check the price in the Hard Rock app before placing anything manually. Estimated EV is not a guarantee.",
-                        f"opp:{rid}", "INFO", is_demo)
+            title, body = recommendation_text(db, r)
+            # every qualifying bet must reach the phone: per-recommendation dedupe, no per-kind rate limit
+            raise_alert(db, "opportunity", title, body, f"opp:{rid}", "INFO", is_demo, rate_limited=False)
         _price_and_divergence_alerts(db, is_demo)
     return out
 

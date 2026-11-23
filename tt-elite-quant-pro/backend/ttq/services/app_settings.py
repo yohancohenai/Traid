@@ -39,6 +39,7 @@ DEFAULTS: dict[str, dict] = {
         "email": True, "telegram": True, "browser": True,  # external channels send only when configured in .env
         "min_interval_seconds": 120, "price_change_threshold": 0.05, "divergence_threshold": 0.12,
         "stale_provider_minutes": 30,
+        "units_per_bet": 1.0,
         "price_targets": True, "price_targets_max": 8, "price_targets_window_minutes": 75,
     },
     "display": {"timezone": "America/New_York", "data_mode": "ALL"},

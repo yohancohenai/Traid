@@ -78,3 +78,43 @@ def test_test_alert_reports_status(monkeypatch):
     monkeypatch.setattr(alerts, "_send_telegram", bad)
     res = alerts.send_test_alert()
     assert res["telegram"].startswith("failed: HTTP 401") and "botX" not in res["telegram"]   # never echoes the token
+
+
+def test_bet_recommendation_message_format(f, db):
+    from ttq.models import ModelVersion, Recommendation
+    from ttq.services.messages import recommendation_text
+    a, b = f.player("Mateusz Baran"), f.player("Miroslaw Lewczuk")
+    from datetime import datetime, timezone
+    m = f.match(a, b, at=datetime(2026, 11, 24, 0, 10, tzinfo=timezone.utc))      # 19:10 ET on Nov 23
+    mv = ModelVersion(name="dyn_elo", kind="RatingOnly", version="20261123162333", status="CHAMPION",
+                      trained_at=datetime(2026, 11, 23, 16, 23, tzinfo=timezone.utc))
+    db.add(mv); db.flush()
+    pr = f.prediction(m, p1=0.588); pr.model_version_id = mv.id
+    r = Recommendation(match_id=m.id, prediction_id=pr.id, market="match_winner", selection="p1", bookmaker_key="hardrock",
+                       decimal_odds=2.0, model_prob=0.588, prob_low=0.55, prob_high=0.62, ev=0.176, status="QUALIFIES",
+                       data_quality="HIGH")
+    db.add(r); db.flush()
+    title, body = recommendation_text(db, r)
+    assert title == "New Bet Recommendation"
+    lines = body.splitlines()
+    assert lines[0] == "Mateusz Baran vs Miroslaw Lewczuk"
+    assert lines[1] == "Pick: Mateusz Baran (HOME)"
+    assert lines[2] == "Odds: 2.00 (+100) | Prob: 58.8% | EV: 17.6%"
+    assert lines[3] == "Units: 1.0"
+    assert lines[4] == "Match: Nov 23, 7:10 PM ET"
+    assert lines[5] == "Model: dyn_elo_20261123162333 (2026-11-23)"
+    assert lines[6].startswith("Ruleset: EV>=3%")
+
+
+def test_every_qualifying_bet_reaches_telegram(f, db, monkeypatch):
+    from ttq.services.alerts import raise_alert
+    sent = []
+    monkeypatch.setattr("ttq.services.alerts._send_telegram", lambda t, b: sent.append(t) or True)
+    monkeypatch.setattr("ttq.services.alerts._send_email", lambda t, b: False)
+    raise_alert(db, "opportunity", "New Bet Recommendation", "a", "opp:1", rate_limited=False)
+    raise_alert(db, "opportunity", "New Bet Recommendation", "b", "opp:2", rate_limited=False)   # seconds later
+    raise_alert(db, "opportunity", "New Bet Recommendation", "a", "opp:1", rate_limited=False)   # duplicate
+    assert len(sent) == 2
+    raise_alert(db, "provider_stale", "x", "y", "stale:1")
+    raise_alert(db, "provider_stale", "x", "y", "stale:2")                                       # rate-limited kind
+    assert len(sent) == 3
