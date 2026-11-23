@@ -26,7 +26,7 @@ services:
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_started}
-    ports: ["127.0.0.1:8000:8000"]
+    ports: ["127.0.0.1:${TTQ_API_PORT:-8000}:8000"]  # only for debugging; the frontend proxies to api:8000 internally
     restart: unless-stopped
   worker:
     build: ./backend

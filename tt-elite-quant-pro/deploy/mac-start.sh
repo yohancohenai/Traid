@@ -49,7 +49,23 @@ fi
 
 if [ "${TTQ_LAN:-0}" = "1" ]; then export TTQ_BIND=0.0.0.0; else export TTQ_BIND=127.0.0.1; fi
 
+# Pick free host ports: other apps on the Mac often use 8000 (the API port is only for debugging anyway).
+port_busy() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
+running_here() { docker compose ps --status running --services 2>/dev/null | grep -qx "$1"; }
+if [ -z "${TTQ_API_PORT:-}" ]; then
+  TTQ_API_PORT=8000
+  if port_busy 8000 && ! running_here api; then
+    for p in 8011 8021 8031 8041; do port_busy "$p" || { TTQ_API_PORT=$p; break; }; done
+  fi
+  export TTQ_API_PORT
+fi
+if port_busy 3000 && ! running_here frontend; then
+  echo "Port 3000 is used by another program. Close it (see: lsof -nP -iTCP:3000 -sTCP:LISTEN) and re-run."
+  exit 1
+fi
+
 echo "Building and starting (first time takes ~5–10 minutes)…"
+docker compose build api   # build the backend once (api and worker share it)
 docker compose up -d --build
 
 echo "Waiting for the API…"
