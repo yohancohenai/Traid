@@ -19,7 +19,11 @@ EVEN_RE = re.compile(r"^(EVEN|EV)$", re.I)
 LINE_RE = re.compile(r"^[+\-−–]?\d{1,3}(\.\d)?$|^[OU]$|^[OU]\d")
 NAME_RE = re.compile(r"^[A-Za-zÀ-žŁłŚśŻżŹźĆćŃńÓóĄąĘę.'\-]+$")
 JUNK = {"MORE", "BETS", "SPREAD", "TOTAL", "MONEY", "MONEYLINE", "LIVE", "TODAY", "TOMORROW", "AM", "PM", "TT",
-        "ELITE", "SERIES", "TABLE", "TENNIS", "POLAND", "BET", "SGP", "SETS", "SET", "MATCH"}
+        "ELITE", "SERIES", "TABLE", "TENNIS", "POLAND", "BET", "SGP", "SETS", "SET", "MATCH",
+        # labels seen on the real Hard Rock list
+        "EST", "WAGERS", "WAGER", "MOST", "POPULAR", "BOOST", "BOOSTED", "PARLAY", "SAME", "GAME", "PROMO", "ODDS",
+        "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG",
+        "SEP", "OCT", "NOV", "DEC", "ET", "CT", "PT", "MT"}
 
 
 class OcrUnavailable(RuntimeError):
@@ -53,29 +57,48 @@ def norm_odds(tok: str) -> int | None:
     return None
 
 
+def _row_tokens(r: Row) -> tuple[str, list[int]]:
+    name_parts, odds = [], []
+    for text, conf, left in sorted(r.words, key=lambda w: w[2]):
+        o = norm_odds(text)
+        if o is not None:
+            odds.append(o)
+            continue
+        if LINE_RE.match(text.replace("−", "-")) or re.match(r"^\d{1,2}:\d{2}$", text):
+            continue
+        if NAME_RE.match(text) and text.upper().strip(".") not in JUNK:
+            name_parts.append(text)
+    return " ".join(name_parts).strip(), odds
+
+
 def parse_rows(rows: list[Row]) -> list[PlayerLine]:
-    """Turn OCR rows into player lines (name + moneyline). Rows without a name are ignored."""
-    out = []
+    """OCR rows -> player lines (name + moneyline).
+
+    Only rows that carry a price become player lines, so headers and labels ("EST wagers", promos) can never shift
+    the pairing. If a priced row holds just one name token and the adjacent row is a name-only line (surname wrapped
+    onto its own line), the two are merged."""
+    items = []
     for r in rows:
-        name_parts, odds, notes = [], [], []
-        for text, conf, left in sorted(r.words, key=lambda w: w[2]):
-            o = norm_odds(text)
-            if o is not None:
-                odds.append(o)
-                continue
-            if LINE_RE.match(text.replace("−", "-")) or re.match(r"^\d{1,2}:\d{2}$", text):
-                continue
-            if NAME_RE.match(text) and text.upper().strip(".") not in JUNK and len(text.strip(".")) >= 1:
-                name_parts.append(text)
-        name = " ".join(name_parts).strip()
-        if len(name.replace(".", "")) < 3:
+        name, odds = _row_tokens(r)
+        if len(name.replace(".", "")) < 2:
             continue
-        if not odds:
-            out.append(PlayerLine(name, None, r.conf, ["no moneyline found"]))
+        items.append({"name": name, "odds": odds, "conf": r.conf, "used": False})
+    out = []
+    for i, it in enumerate(items):
+        if not it["odds"]:
             continue
-        if len(odds) > 1:
+        name, notes = it["name"], []
+        if len(name.split()) == 1:
+            for j in (i + 1, i - 1):
+                if 0 <= j < len(items) and not items[j]["odds"] and not items[j]["used"]:
+                    other = items[j]["name"]
+                    name = f"{name} {other}" if j > i else f"{other} {name}"
+                    items[j]["used"] = True
+                    notes.append("name joined from two lines")
+                    break
+        if len(it["odds"]) > 1:
             notes.append("several prices on the row; took the rightmost as moneyline")
-        out.append(PlayerLine(name, odds[-1], r.conf, notes))
+        out.append(PlayerLine(name, it["odds"][-1], it["conf"], notes))
     return out
 
 
@@ -110,7 +133,9 @@ def ocr_rows(image_bytes: bytes) -> tuple[list[Row], str]:
 
 # ---------------------------------------------------------------- matching to the official schedule
 def name_score(raw: str, canonical: str) -> float:
-    from ttq.identity.names import normalize_name, similarity, surname_initial_key
+    """How well an OCR'd name matches an official 'First Last' name. Single tokens (Hard Rock often shows only a first
+    name or a surname) score below a full match, and a pair still needs BOTH players to fit the same official match."""
+    from ttq.identity.names import normalize_name, similarity, strip_diacritics, surname_initial_key
     s = similarity(raw, canonical)
     abbr = surname_initial_key(raw)
     if abbr:
@@ -118,6 +143,13 @@ def name_score(raw: str, canonical: str) -> float:
         toks = normalize_name(canonical).split()
         if sur in toks and any(t.startswith(ini) for t in toks if t != sur):
             s = max(s, 0.92)
+    raw_toks = strip_diacritics(raw).lower().replace(".", "").split()
+    canon = strip_diacritics(canonical).lower().split()
+    if len(raw_toks) == 1 and canon:
+        if raw_toks[0] == canon[-1]:
+            s = max(s, 0.85)          # surname only
+        elif raw_toks[0] == canon[0]:
+            s = max(s, 0.80)          # first name only
     return s
 
 
@@ -138,8 +170,10 @@ def propose(db, pairs: list[tuple[PlayerLine, PlayerLine]], is_demo: bool, now=N
         scored = []
         for m in ups:
             n1, n2 = m.player1.canonical_name, m.player2.canonical_name
-            straight = (name_score(a.name, n1) + name_score(b.name, n2)) / 2
-            flipped = (name_score(a.name, n2) + name_score(b.name, n1)) / 2
+            def pair_score(x, y):
+                sx, sy = name_score(a.name, x), name_score(b.name, y)
+                return (sx + sy) / 2 if min(sx, sy) >= 0.7 else 0.0   # both players must fit on their own
+            straight, flipped = pair_score(n1, n2), pair_score(n2, n1)
             scored.append((max(straight, flipped), flipped > straight, m))
         scored.sort(key=lambda x: (-x[0], x[2].scheduled_at))
         reasons = list(a.notes + b.notes)

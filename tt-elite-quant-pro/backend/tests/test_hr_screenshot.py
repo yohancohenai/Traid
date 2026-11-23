@@ -93,3 +93,41 @@ def test_catch_up_after_downtime(db):
     assert called == [370]
     db.query(DataSource).one().last_success_at = utcnow()
     assert catch_up_ttseries(db, backfill=lambda s: called.append(s)) is None and called == [370]
+
+
+def test_real_layout_junk_rows_dont_shift_pairing():
+    """Reproduces the first real Hard Rock import: an 'EST wagers' label row used to shift every pair after it."""
+    rows = [R("Artur", "-800"), R("Dariusz", "+475"),
+            R("EST", "wagers"),
+            R("Adam", "-300"), R("Aleksander", "+190"),
+            R("Slawomir", "+115"), R("Andrzej", "Krezel", "-165"),
+            R("EST", "wagers"),
+            R("Henryk", "-185"), R("Jakub", "Nowak", "+130")]
+    pairs = [(a.name, a.american, b.name, b.american) for a, b in pair_matches(parse_rows(rows))]
+    assert pairs == [("Artur", -800, "Dariusz", 475), ("Adam", -300, "Aleksander", 190),
+                     ("Slawomir", 115, "Andrzej Krezel", -165), ("Henryk", -185, "Jakub Nowak", 130)]
+
+
+def test_surname_on_next_line_is_joined():
+    lines = parse_rows([R("Artur", "-140"), R("Sobel"), R("Mikolaj", "Lukaszewski", "+100")])
+    assert [l.name for l in lines] == ["Artur Sobel", "Mikolaj Lukaszewski"]
+
+
+def test_first_name_pairs_match_official_schedule(f, db):
+    m = _upcoming(f, "Artur Sobel", "Dariusz Dytko")
+    _upcoming(f, "Pawel Kurek", "Grzegorz Wichowski")
+    p = propose(db, [(PlayerLine("Artur", -800, 90), PlayerLine("Dariusz", 475, 90))], False)[0]
+    assert p["match_id"] == m.id and (p["p1_american"], p["p2_american"]) == (-800, 475)
+
+
+def test_one_strong_name_cannot_carry_a_wrong_partner(f, db):
+    _upcoming(f, "Artur Sobel", "Dariusz Dytko")
+    p = propose(db, [(PlayerLine("Artur Sobel", -800, 90), PlayerLine("Zbigniew", 475, 90))], False)[0]
+    assert p["match_id"] is None and p["needs_review"]
+
+
+def test_ambiguous_first_names_stay_flagged(f, db):
+    _upcoming(f, "Artur Sobel", "Dariusz Dytko", 30)
+    _upcoming(f, "Artur Nowak", "Dariusz Krol", 50)
+    p = propose(db, [(PlayerLine("Artur", -800, 90), PlayerLine("Dariusz", 475, 90))], False)[0]
+    assert p["needs_review"] and any("more than one" in r for r in p["reasons"])
