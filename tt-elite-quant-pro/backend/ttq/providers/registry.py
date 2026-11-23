@@ -11,6 +11,14 @@ CATALOGUE = [
      "verification": "User-entered from the Hard Rock Bet app; timestamped at entry.", "hard_rock": True, "draftkings": False},
     {"key": "csv_import", "name": "CSV import (licensed exports)", "kind": "both", "is_demo": False,
      "verification": "Depends on the export's licence and provenance.", "hard_rock": None, "draftkings": None},
+    {"key": "ttseries", "name": "TT Elite Series official (tt-series.com)", "kind": "results", "is_demo": False,
+     "verification": "VERIFIED 2026-11-23: organiser's public site. robots.txt only disallows /wp-admin/; rules contain no "
+                     "clause against automated reading. Schedule ~2 days ahead, set + game scores, stable player ids, "
+                     "archive from ~2026-11-07. Polled politely (<=1 request / 5 s).",
+     "hard_rock": False, "draftkings": False},
+    {"key": "scores24", "name": "scores24.live", "kind": "results", "is_demo": False,
+     "verification": "REJECTED: terms forbid 'automated programs'; robots.txt blocks match pages and odds feeds.",
+     "hard_rock": False, "draftkings": False},
     {"key": "the_odds_api", "name": "The Odds API v4", "kind": "odds", "is_demo": False,
      "verification": "UNVERIFIED for TT Elite. Has hardrockbet/draftkings bookmaker keys; TT sport key not confirmed.",
      "hard_rock": "unverified", "draftkings": "unverified"},
@@ -28,6 +36,9 @@ CATALOGUE = [
 
 def results_providers() -> list[ResultsProvider]:
     out: list[ResultsProvider] = []
+    if get_settings().enable_ttseries:
+        from ttq.providers.ttseries import TTSeriesResultsProvider
+        out.append(TTSeriesResultsProvider())
     if get_settings().enable_demo:
         from ttq.providers.demo import DemoResultsProvider
         out.append(DemoResultsProvider())

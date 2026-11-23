@@ -36,3 +36,11 @@ Restore: `gunzip -c backups/<file>.sql.gz | $C exec -T db psql -U ttq ttq`
 * Change the admin password: `$C run --rm api python -m ttq.cli hash-password --password 'NEW'`, put the hash in
   `.env` as `TTQ_ADMIN_PASSWORD_HASH`, then `$C up -d`.
 * Never commit `.env`.
+
+## First real data (run once after setup)
+```bash
+$C exec api python -m ttq.cli backfill-ttseries --from-id 1   # ~35 min, polite 1 request / 5 s
+$C exec api python -m ttq.cli train-force --live              # first real model
+$C exec api python -m ttq.cli predict                         # predictions for the next 48 h
+```
+After that the worker keeps results, predictions and retraining up to date automatically.

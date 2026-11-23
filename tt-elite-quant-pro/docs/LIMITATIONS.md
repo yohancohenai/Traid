@@ -1,8 +1,13 @@
 # Known limitations (read before relying on anything)
 
-1. **No verified live data source yet.** There is no verified TT Elite results feed and no verified Hard Rock odds
-   feed. Real use requires (a) a licensed results provider or licensed CSV exports, and (b) manual Hard Rock entry or a
-   contracted aggregator. Until then, LIVE mode is empty, and **"NO QUALIFYING BETS FOUND."** is the correct output.
+1. **Results are live; Hard Rock odds are manual.** Official results and schedule come from www.tt-series.com. There
+   is no automated Hard Rock feed: QUALIFIES requires a Hard Rock price you entered within the last 10 minutes.
+   Without one, the correct output is **"NO QUALIFYING BETS FOUND."**
+   - There are no historical Hard Rock odds for real matches, so LIVE backtests and LIVE filter selection have
+     nothing to work with until your manually entered quotes accumulate. Until then the conservative default
+     filters apply.
+   - The tt-series archive starts around 2026-11-07, so the first real model is trained on a few weeks of data.
+     Expect it to improve as history grows; retraining is automatic and gated.
 2. **DEMO results say nothing about real profitability.** In DEMO data the synthetic "market" is generated as
    truth plus noise, so the model can beat it by construction. The DEMO backtest showing positive ROI is a pipeline
    test, not evidence of an edge. Seed run (test period, champion = stacked model): 426 paper bets, ROI +13.0%

@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     telegram_chat_id: str | None = None
 
     cors_origins: str = "http://localhost:3000"
+
+    # Official TT Elite Series site (www.tt-series.com): polite access settings
+    enable_ttseries: bool = True
+    ttseries_min_interval_seconds: float = 5.0
     enable_demo: bool = True
 
 

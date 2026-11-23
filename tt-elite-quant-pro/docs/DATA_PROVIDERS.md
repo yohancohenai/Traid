@@ -1,5 +1,25 @@
 # Data provider comparison (researched 2026-11-23)
 
+## Primary results source: the official www.tt-series.com (VERIFIED, free)
+The organiser's own public site, linked from eliteseries.eu.
+- **robots.txt** disallows only `/wp-admin/`. The rules, integrity and privacy pages contain no clause restricting
+  automated reading, and rule 13.4 says results are announced publicly.
+- **Data:** full schedule about 2 days ahead (Europe/Warsaw times) and set scores **with every game's points**.
+  Stable numeric player IDs. About 25 round-robin tournaments a day across OSP, OSP2, HSC, HSC2, POCZESNA and
+  BLACHOWNIA. Archive by tournament ID from about 2026-11-07.
+- **Adapter:** `providers/ttseries.py`. Identified User-Agent, ≤ 1 request / 5 s, polled every 10 min, finished
+  tournaments never re-fetched. Backfill: `python -m ttq.cli backfill-ttseries --from-id 1`.
+- **Treatment:** results are treated as official (`verified=True`), so bets on finished matches settle
+  automatically. Walkovers, interruptions and cancellations go to manual review.
+- **If the site's layout changes,** the parser returns no matches rather than wrong ones (fixture tests in
+  `tests/test_ttseries.py`). Re-capture fixtures and adjust `parse_tournament`.
+
+## Rejected: scores24.live
+Its terms say users may not "use automated programs to interact with the Site", and its robots.txt blocks
+table-tennis match pages, the odds and data feeds, and AI crawlers. Not used.
+
+---
+
 **Bottom line: no provider could be verified for TT Elite Series from the build environment.** Every host named in
 the brief failed DNS resolution from the build sandbox. Web search returned no trace of four of them. The app is
 therefore built around **pluggable adapters, CSV import of licensed exports, and fast manual Hard Rock odds entry**,

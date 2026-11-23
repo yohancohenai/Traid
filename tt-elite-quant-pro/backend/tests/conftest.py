@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("TTQ_DATABASE_URL", os.environ.get("TTQ_TEST_DATABASE_URL", "postgresql+psycopg://ttq:ttq@localhost:5432/ttq_test"))
 os.environ["TTQ_ENABLE_DEMO"] = "false"
+os.environ["TTQ_ENABLE_TTSERIES"] = "false"  # never hit the network in tests
 os.environ["TTQ_ARTIFACTS_DIR"] = "/tmp/ttq_test_artifacts"
 
 import pytest

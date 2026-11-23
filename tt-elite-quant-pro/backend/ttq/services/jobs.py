@@ -43,9 +43,64 @@ def _jsonable(x):
     return json.loads(json.dumps(x, default=str))
 
 
+def complete_tournament_refs(db: Session, source_key: str) -> set[str]:
+    """Tournaments whose every match is final: never re-fetched."""
+    from sqlalchemy import func
+    from ttq.models import Tournament
+    rows = db.execute(select(Tournament.source_ref, func.count(Match.id),
+                             func.count(Match.id).filter(Match.status.in_(["SCHEDULED", "LIVE"])))
+                      .join(Match, Match.tournament_id == Tournament.id)
+                      .where(Tournament.source_key == source_key).group_by(Tournament.source_ref)).all()
+    return {ref for ref, n, open_ in rows if n and not open_}
+
+
 def ingest_results_job(db: Session) -> dict:
     now = utcnow()
-    return {p.key: ingest.ingest_results(db, p, now - timedelta(days=3), now + timedelta(days=2)) for p in results_providers()}
+    out = {}
+    for p in results_providers():
+        if p.key == "ttseries":
+            p.skip_refs = complete_tournament_refs(db, "ttseries")
+            out[p.key] = ingest.ingest_results(db, p, now - timedelta(days=1), now + timedelta(days=2))
+        else:
+            out[p.key] = ingest.ingest_results(db, p, now - timedelta(days=3), now + timedelta(days=2))
+    return out
+
+
+def backfill_ttseries(from_id: int, to_id: int | None = None, stop_after_empty: int = 15) -> dict:
+    """Walk tt-series tournament ids, one committed transaction per tournament (resumable). Already-complete
+    tournaments are skipped without a request."""
+    from ttq.providers.ttseries import TTSeriesResultsProvider
+    p = TTSeriesResultsProvider()
+    if to_id is None:
+        to_id = max(c.tid for c in p.list_tournaments(max_pages=1))
+    with session_scope() as db:
+        done = complete_tournament_refs(db, p.key)
+        ingest.ensure_source(db, p.key, p.name, "results", False)
+    stats = {"fetched": 0, "skipped": 0, "matches": 0, "empty": 0, "to_id": to_id}
+    empties = 0
+    for tid in range(from_id, to_id + 1):
+        if f"tts-{tid}" in done:
+            stats["skipped"] += 1
+            continue
+        ms, page = p.fetch_tournament(tid)
+        stats["fetched"] += 1
+        if not ms:
+            stats["empty"] += 1
+            empties += 1
+            if empties >= stop_after_empty:
+                break
+            continue
+        empties = 0
+        with session_scope() as db:
+            ingest.save_raw(db, p.key, f"/tournaments/?ttes_tournament={tid}", {"html": page}, False)
+            for pm in ms:
+                ingest.upsert_match(db, pm, p)
+            src = db.scalar(select(DataSource).where(DataSource.key == p.key))
+            src.status, src.last_success_at = "OK", utcnow()
+        stats["matches"] += len(ms)
+        if stats["fetched"] % 25 == 0:
+            log.info(f"backfill progress: tournament {tid}/{to_id}, {stats['matches']} matches")
+    return stats
 
 
 def ingest_odds_job(db: Session) -> dict:

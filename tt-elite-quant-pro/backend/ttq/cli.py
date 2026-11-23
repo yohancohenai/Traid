@@ -9,14 +9,18 @@ from ttq.services import jobs
 def main():
     setup_logging()
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["seed-demo", "ingest", "predict", "settle", "monitor", "retrain", "train-force", "hash-password"])
+    ap.add_argument("cmd", choices=["backfill-ttseries", "seed-demo", "ingest", "predict", "settle", "monitor", "retrain", "train-force", "hash-password"])
     ap.add_argument("--fast", action="store_true")
     ap.add_argument("--live", action="store_true", help="operate on live (non-demo) data where applicable")
     ap.add_argument("--password")
+    ap.add_argument("--from-id", type=int, default=1)
+    ap.add_argument("--to-id", type=int)
     a = ap.parse_args()
     if a.cmd == "hash-password":
         import bcrypt
         print(bcrypt.hashpw(a.password.encode(), bcrypt.gensalt()).decode()); return
+    if a.cmd == "backfill-ttseries":
+        print(json.dumps(jobs.backfill_ttseries(a.from_id, a.to_id), indent=2)); return
     if a.cmd == "seed-demo":
         r = jobs.run_job("seed_demo", jobs.seed_demo, fast=a.fast)
     elif a.cmd == "ingest":

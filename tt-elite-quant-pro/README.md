@@ -17,10 +17,10 @@ record the bets you actually place. It tracks results, settlement, P/L and bankr
 ![Opportunities](docs/screenshots/opportunities.png)
 
 ## Data status
-No TT Elite Series data provider could be verified during the build (see DATA_PROVIDERS.md). Out of the box the app
-runs a **DEMO** synthetic world: it is labelled DEMO everywhere, and it is stored and computed separately from live data.
-For real use, connect a licensed results source (adapter or CSV import) and enter Hard Rock prices manually (or through a
-contracted aggregator).
+* **Results and schedule:** official, from www.tt-series.com (the TT Elite Series organiser's public site), polled politely.
+  On a fresh install, run `python -m ttq.cli backfill-ttseries --from-id 1`, then `python -m ttq.cli train-force --live`.
+* **Hard Rock odds:** manual entry (Odds Comparison → Manual entry). There is no public Hard Rock API.
+* **DEMO:** a separate synthetic world for trying the app. It is labelled DEMO everywhere and never mixed with live data.
 
 ## Quick start (Docker)
 ```bash
