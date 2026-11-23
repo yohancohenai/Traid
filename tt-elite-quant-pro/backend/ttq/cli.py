@@ -9,7 +9,7 @@ from ttq.services import jobs
 def main():
     setup_logging()
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["test-alert", "price-targets", "backfill-ttseries", "seed-demo", "ingest", "predict", "settle", "monitor", "retrain", "train-force", "hash-password"])
+    ap.add_argument("cmd", choices=["status", "picks-preview", "test-alert", "price-targets", "backfill-ttseries", "seed-demo", "ingest", "predict", "settle", "monitor", "retrain", "train-force", "hash-password"])
     ap.add_argument("--fast", action="store_true")
     ap.add_argument("--live", action="store_true", help="operate on live (non-demo) data where applicable")
     ap.add_argument("--password")
@@ -19,6 +19,28 @@ def main():
     if a.cmd == "hash-password":
         import bcrypt
         print(bcrypt.hashpw(a.password.encode(), bcrypt.gensalt()).decode()); return
+    if a.cmd == "status":
+        from ttq.services.status import system_status
+        res = system_status()
+        for k, v in res["checks"]:
+            print(f"{'OK  ' if v['ok'] else 'FIX '} {k}: {v['detail']}")
+        print("\nREADY: picks will be sent to Telegram when a match passes." if res["ready"]
+              else "\nNOT READY: fix the items marked FIX above.")
+        return
+    if a.cmd == "picks-preview":
+        from ttq.core.db import SessionLocal
+        from ttq.services.messages import conditional_pick_text
+        from ttq.services.targets import build_picks
+        db = SessionLocal()
+        try:
+            picks = build_picks(db)
+            print(f"{len(picks)} pick(s) would be sent right now (preview only; nothing sent or marked).")
+            for pk in picks:
+                t, b = conditional_pick_text(db, pk["match"], pk["pred"], pk["side"], pk["p"], pk["min_american"])
+                print("\n" + t + "\n" + b)
+        finally:
+            db.rollback(); db.close()
+        return
     if a.cmd == "test-alert":
         from ttq.services.alerts import send_test_alert
         res = send_test_alert()

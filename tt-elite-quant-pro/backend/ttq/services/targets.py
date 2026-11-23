@@ -129,8 +129,9 @@ def build_picks(db: Session, now: datetime | None = None) -> list[dict]:
             if datetime.fromisoformat(v) > now - timedelta(days=2)}
     today = now.astimezone(tz).date()
     sent_today = sum(1 for v in sent.values() if datetime.fromisoformat(v).astimezone(tz).date() == today)
-    room = int(cfg.get("picks_max_per_day", 10)) - sent_today
-    if room <= 0:
+    cap = int(cfg.get("picks_max_per_day", 0) or 0)          # 0 = unlimited: send every pick that passes
+    room = (cap - sent_today) if cap > 0 else None
+    if room is not None and room <= 0:
         return []
     ms = db.scalars(select(Match).where(Match.is_demo.is_(False), Match.status == "SCHEDULED",
                                         Match.scheduled_at >= now + timedelta(minutes=lo_min),
@@ -161,7 +162,7 @@ def build_picks(db: Session, now: datetime | None = None) -> list[dict]:
             cands.append((width, m, pred, best))
     cands.sort(key=lambda c: (c[0], c[1].scheduled_at))
     picks = []
-    for width, m, pred, (_, side, p, am) in cands[:room]:
+    for width, m, pred, (_, side, p, am) in (cands if room is None else cands[:room]):
         picks.append({"match": m, "pred": pred, "side": side, "p": p, "min_american": am})
         sent[str(m.id)] = now.isoformat()
     if picks:

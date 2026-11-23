@@ -44,7 +44,7 @@ def test_one_side_and_conservative_minimum(f, db):
     assert pk["side"] in ("p1", "p2")
 
 
-def test_daily_cap(f, db):
+def test_daily_cap_when_set(f, db):
     _setup(db)
     set_setting(db, "alerts", {"picks_max_per_day": 3})
     for i in range(6):
@@ -90,3 +90,19 @@ def test_job_sends_every_pick(f, db, monkeypatch):
     r = picks_job(db)
     assert r["sent"] == 3 and len(sent) == 3
     assert db.query(Alert).filter_by(kind="pick").count() == 3
+
+
+def test_no_daily_cap_by_default(f, db):
+    _setup(db)
+    for i in range(14):
+        _m(f, db, 15 + i)
+    assert len(build_picks(db)) == 14
+
+
+def test_status_reports_missing_pieces(db):
+    db.commit()
+    from ttq.services.status import system_status
+    r = system_status()
+    names = {k for k, _ in r["checks"]}
+    assert {"match history", "trained model", "Telegram configured", "scheduler (worker)"} <= names
+    assert r["ready"] is False      # empty test database: nothing in place yet

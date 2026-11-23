@@ -83,10 +83,13 @@ or the model needs attention.
    A test message should arrive. If it says `failed: HTTP 401`, the token is wrong; `HTTP 400 chat not found` means
    the chat id is wrong or you haven't messaged the bot yet.
 
-**Conditional picks (no screenshot needed):** up to 10 a day, for the strongest matches (high data quality, tightest
+**Conditional picks (no screenshot needed):** sent whenever a match passes, for the strongest matches (high data quality, tightest
 uncertainty), 10–45 minutes before start, in the "New Bet Recommendation" layout with a line like
 `Bet only if Hard Rock odds >= +135`. Check the price in Hard Rock and bet only if it is at least that. Tune or turn
-off in Settings → Alerts (`conditional_picks`, `picks_max_per_day`, `picks_max_interval`).
+off in Settings → Alerts (`conditional_picks`, `picks_max_interval`; `picks_max_per_day` 0 = no cap).
+
+**Check everything is working:** `docker compose exec api python -m ttq.cli status` (every line should say OK), and
+`docker compose exec api python -m ttq.cli picks-preview` to see what would be sent right now.
 
 Price targets are the **minimum** Hard Rock price at which a side would pass your filters (Settings → Filters),
 rounded conservatively. They are not tips: check Hard Rock, upload a screenshot, and let the scanner confirm. Turn
