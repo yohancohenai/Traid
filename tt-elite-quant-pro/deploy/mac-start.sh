@@ -67,6 +67,9 @@ fi
 echo "Building and starting (first time takes ~5–10 minutes)…"
 docker compose build api   # build the backend once (api and worker share it)
 docker compose up -d --build
+# Drop superseded image versions and build cache so repeated updates don't fill Docker's disk (data volumes are untouched).
+docker image prune -f >/dev/null 2>&1 || true
+docker builder prune -f --filter until=24h >/dev/null 2>&1 || true
 
 echo "Waiting for the API…"
 for _ in $(seq 1 60); do
