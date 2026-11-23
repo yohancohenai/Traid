@@ -19,7 +19,7 @@ from ttq.core.config import get_settings
 from ttq.core.timeutil import as_utc, utcnow
 from ttq.models import Bookmaker, Match, OddsQuote, Prediction, Recommendation
 from ttq.odds.math import expected_value, no_vig_multiplicative, implied_prob
-from ttq.services.app_settings import QUALITY_ORDER, get_setting
+from ttq.services.app_settings import QUALITY_ORDER, get_filters, get_setting
 from ttq.services.modeling import latest_prediction
 from ttq.sim.tt import full_match_model, prob_set_handicap
 
@@ -52,9 +52,9 @@ def observed_at(q: OddsQuote):
     return min(ours, as_utc(q.quoted_at)) if q.quoted_at else ours
 
 
-def effective_max_age(db) -> int:
-    from ttq.services.app_settings import get_setting
-    return min(get_setting(db, "filters")["max_quote_age_seconds"], get_settings().max_quote_age_seconds)
+def effective_max_age(db, is_demo: bool = False) -> int:
+    from ttq.services.app_settings import get_filters
+    return min(get_filters(db, is_demo)["max_quote_age_seconds"], get_settings().max_quote_age_seconds)
 
 
 def quote_status(q: OddsQuote | None, m: Match, max_age: int, now=None) -> str:
@@ -84,6 +84,10 @@ def opening_quote(db: Session, match_id: int, book: str, selection: str) -> Odds
     return db.scalar(select(OddsQuote).where(OddsQuote.match_id == match_id, OddsQuote.bookmaker_key == book,
                                              OddsQuote.market == "match_winner", OddsQuote.selection == selection)
                      .order_by(OddsQuote.captured_at).limit(1))
+
+
+def dec_ev_too_big(p, dec, cap=0.25):
+    return dec is not None and expected_value(p, dec) > cap
 
 
 def build_reasons(pred: Prediction, side: str, p: float, novig: float | None, dk_novig: float | None,
@@ -116,6 +120,8 @@ def build_reasons(pred: Prediction, side: str, p: float, novig: float | None, dk
         spread = max(vals) - min(vals)
         (pro if spread < 0.05 else con).append(
             f"Model {'agreement' if spread < 0.05 else 'disagreement'}: component probabilities {min(vals):.0%}-{max(vals):.0%}.")
+    if novig is not None and dec_ev_too_big(p, cur_dec):
+        con.append("Estimated EV is implausibly large; most such gaps are stale/wrong prices or data errors. Verify before acting.")
     if novig is not None and p - novig > 0.10:
         con.append(f"Large gap vs Hard Rock no-vig ({novig:.0%}); the market may hold information the model lacks.")
     if dk_novig is not None:
@@ -140,6 +146,7 @@ def evaluate(p, lo, hi, dec, novig, dq, qstat, n_min, spread, F) -> tuple[str, d
     checks = {
         "quote_verified": qstat == "VERIFIED",
         "min_ev": ev is not None and ev >= F["min_ev"],
+        "plausible_ev": ev is not None and ev <= F.get("max_ev", 0.25),
         "min_ev_low": ev_low is not None and ev_low >= F["min_ev_low"],
         "min_edge": novig is not None and (p - novig) >= F["min_edge"],
         "data_quality": QUALITY_ORDER[dq] >= QUALITY_ORDER[F["min_data_quality"]],
@@ -161,7 +168,6 @@ def scan(db: Session, is_demo: bool | None = None, now=None) -> dict:
     only written when the underlying prediction, quote or status changes."""
     ensure_bookmakers(db)
     now = now or utcnow()
-    F = get_setting(db, "filters")
     q = select(Match).where(Match.status == "SCHEDULED", Match.scheduled_at > now,
                             Match.scheduled_at <= now + timedelta(hours=48))
     if is_demo is not None:
@@ -172,6 +178,7 @@ def scan(db: Session, is_demo: bool | None = None, now=None) -> dict:
         pred = latest_prediction(db, m.id)
         if not pred:
             continue
+        F = get_filters(db, m.is_demo)
         counts["matches"] += 1
         hr = latest_quotes(db, m.id, PRIMARY_BOOK)
         dk = latest_quotes(db, m.id, "draftkings")
@@ -186,7 +193,7 @@ def scan(db: Session, is_demo: bool | None = None, now=None) -> dict:
             lo, hi = (pred.p1_ci_low, pred.p1_ci_high) if side == "p1" else (1 - pred.p1_ci_high, 1 - pred.p1_ci_low)
             comps = [v if side == "p1" else 1 - v for v in (pred.component_probs or {}).values()] or [p]
             spread = max(comps) - min(comps)
-            qstat = quote_status(qt, m, effective_max_age(db), now)
+            qstat = quote_status(qt, m, effective_max_age(db, m.is_demo), now)
             dec = float(qt.decimal_odds) if qt else None
             novig = hr_nv[idx] if hr_nv else None
             st, checks, ev, ev_low = evaluate(p, lo, hi, dec, novig, pred.data_quality, qstat, n_min, spread, F)

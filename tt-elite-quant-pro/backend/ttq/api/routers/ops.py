@@ -293,8 +293,10 @@ async def import_results(file: UploadFile, db: Session = Depends(get_db), user: 
     text = (await file.read()).decode("utf-8-sig")
     try:
         ms = parse_results_csv(text)
-    except Exception as e:  # noqa
-        raise HTTPException(422, f"could not parse CSV: {e}")
+    except KeyError as e:
+        raise HTTPException(422, f"CSV is missing required column {e}. See the documented header in the import help.")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(422, f"CSV has an invalid value: {e}")
 
     class CsvProvider(ResultsProvider):
         key, name, is_demo, verified = "csv_import", "CSV import", False, False
@@ -315,12 +317,12 @@ async def import_results(file: UploadFile, db: Session = Depends(get_db), user: 
 # ---------------------------------------------------------------- settings
 @router.get("/settings")
 def all_settings(db: Session = Depends(get_db)):
-    return {k: get_setting(db, k) for k in DEFAULTS}
+    return {**{k: get_setting(db, k) for k in DEFAULTS}, "filters_demo": get_setting(db, "filters_demo")}
 
 
 @router.put("/settings/{key}")
 def put_setting(key: str, value: dict, db: Session = Depends(get_db), user: str = Depends(current_user)):
-    if key not in DEFAULTS:
+    if key not in DEFAULTS and key != "filters_demo":
         raise HTTPException(404, "unknown settings group")
     try:
         out = set_setting(db, key, value)
@@ -333,16 +335,21 @@ def put_setting(key: str, value: dict, db: Session = Depends(get_db), user: str 
 
 # ---------------------------------------------------------------- alerts & audit
 @router.get("/alerts")
-def alerts(unread: bool = False, limit: int = 100, db: Session = Depends(get_db)):
+def alerts(unread: bool = False, limit: int = 100, demo: bool | None = None, db: Session = Depends(get_db)):
     q = select(Alert)
+    if demo is not None:
+        q = q.where(Alert.is_demo == demo)
     if unread:
         q = q.where(Alert.read.is_(False))
     return [row(a) for a in db.scalars(q.order_by(Alert.created_at.desc()).limit(limit))]
 
 
 @router.post("/alerts/read-all")
-def read_all(db: Session = Depends(get_db)):
-    for a in db.scalars(select(Alert).where(Alert.read.is_(False))):
+def read_all(demo: bool | None = None, db: Session = Depends(get_db)):
+    q = select(Alert).where(Alert.read.is_(False))
+    if demo is not None:
+        q = q.where(Alert.is_demo == demo)
+    for a in db.scalars(q):
         a.read = True
     db.commit()
     return {"ok": True}

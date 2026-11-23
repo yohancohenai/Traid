@@ -22,7 +22,7 @@ from ttq.odds.math import (american_to_decimal, break_even_prob, decimal_to_amer
 from ttq.providers.csv_import import parse_odds_csv
 from ttq.services import identity as identity_svc
 from ttq.services import monitoring, performance
-from ttq.services.app_settings import get_setting
+from ttq.services.app_settings import get_filters, get_setting
 from ttq.services.audit import audit
 from ttq.services.modeling import build_features, latest_prediction, load_champion, uncertainty_interval, COMPONENTS
 from ttq.services.scanner import ensure_bookmakers, is_executable, latest_quotes
@@ -134,17 +134,19 @@ def match_detail(match_id: int, db: Session = Depends(get_db)):
 
 # ---------------------------------------------------------------- opportunities
 @router.get("/opportunities")
-def opportunities(demo: bool = False, status: str | None = None, db: Session = Depends(get_db)):
+def opportunities(demo: bool = False, status: str | None = None, limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
+                  db: Session = Depends(get_db)):
     now = utcnow()
     rs = db.scalars(select(Recommendation).join(Match, Match.id == Recommendation.match_id)
                     .where(Recommendation.is_current.is_(True), Recommendation.is_demo == demo, Match.scheduled_at > now,
                            Match.status == "SCHEDULED").order_by(Recommendation.ev.desc().nullslast())).all()
     out = [rec_out(db, r) for r in rs]
+    n_q = sum(o["status"] == "QUALIFIES" for o in out)   # counted before the status filter
     if status:
         out = [o for o in out if o["status"] in status.upper().split(",")]
-    q = [o for o in out if o["status"] == "QUALIFIES"]
-    return {"items": out, "qualifying": len(q), "message": None if q else "NO QUALIFYING BETS FOUND.",
-            "filters": get_setting(db, "filters")}
+    out.sort(key=lambda o: ({"QUALIFIES": 0, "WATCH": 1, "PASS": 2}[o["status"]], -(o["ev"] or -9)))
+    return {"items": out[offset:offset + limit], "total": len(out), "qualifying": n_q,
+            "message": None if n_q else "NO QUALIFYING BETS FOUND.", "filters": get_filters(db, demo)}
 
 
 @router.post("/opportunities/{rec_id}/skip")
@@ -294,7 +296,7 @@ def analyze(body: AnalyzeIn, db: Session = Depends(get_db)):
         src = f"{mv.name}@{mv.version}"
     else:
         p, src = f["bayes_p"], "bayes_hier (no trained champion yet)"
-    lo, hi = uncertainty_interval(p, f["bayes_sd"], list(comps.values()), get_setting(db, "filters")["uncertainty_scale"])
+    lo, hi = uncertainty_interval(p, f["bayes_sd"], list(comps.values()), get_filters(db, body.demo)["uncertainty_scale"])
     fm = full_match_model(p, with_points=True)
     out = {"model": src, "p1_win": p, "p1_ci": [lo, hi], "components": comps,
            "rating_probs": {k: f[k] for k in ("elo_p", "dyn_elo_p", "glicko_p", "bayes_p", "set_elo_p", "bt_p")},
@@ -398,8 +400,10 @@ async def import_odds_csv(file: UploadFile, db: Session = Depends(get_db), user:
     text = (await file.read()).decode("utf-8-sig")
     try:
         rows = parse_odds_csv(text)
-    except Exception as e:  # noqa
-        raise HTTPException(422, f"could not parse CSV: {e}")
+    except KeyError as e:
+        raise HTTPException(422, f"CSV is missing required column {e}. Required: match_source_ref, bookmaker, selection, american, quoted_at_utc")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(422, f"CSV has an invalid value: {e}")
     stored = rejected = 0
     for r in rows:
         m = db.scalar(select(Match).where(Match.source_ref == r["match_source_ref"], Match.is_demo.is_(False)))

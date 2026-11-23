@@ -110,7 +110,8 @@ export default function PlayerDetailPage() {
                         <td>
                           <Link className="hover:text-accent" href={`/matches/${m.id}`}>
                             {isP1 ? m.player2.name : m.player1.name}
-                          </Link>
+                          </Link>{" "}
+                          <DemoBadge show={m.is_demo} />
                         </td>
                         <td className={won ? "font-bold" : "text-dim"}>{won ? "W" : "L"}</td>
                         <td className="r num">

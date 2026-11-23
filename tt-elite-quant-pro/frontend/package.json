@@ -1,12 +1,14 @@
 {
-  "name": "frontend",
+  "name": "tt-elite-quant-pro-frontend",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test --trace off"
   },
   "dependencies": {
     "@playwright/test": "^1.65.1",

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError, detailMessage } from "@/lib/api";
 import { useApp } from "@/lib/app-context";
-import { american as fmtAm, americanToDecimal, dec, isNum, localInputToIso, marketLabel, nowLocalInput, pct, usd } from "@/lib/format";
+import { american as fmtAm, americanToDecimal, dec, fmtTime, isNum, localInputToIso, marketLabel, nowLocalInput, pct, usd } from "@/lib/format";
 import type { MatchBrief, MatchWithPred } from "@/lib/types";
 import { DemoBadge, Field, Modal, Notice, Time } from "./ui";
 
@@ -43,7 +43,7 @@ export function BetModal({ open, onClose, prefill, onRecorded }: { open: boolean
 }
 
 function BetForm({ onClose, prefill, onRecorded }: { onClose: () => void; prefill: BetPrefill; onRecorded?: (betId: number) => void }) {
-  const { demo } = useApp();
+  const { demo, tz } = useApp();
   // generated exactly once per modal open (component mounts on open)
   const [clientRequestId] = useState(uuid);
   const [matches, setMatches] = useState<MatchWithPred[] | null>(null);
@@ -224,7 +224,7 @@ function BetForm({ onClose, prefill, onRecorded }: { onClose: () => void; prefil
                 {matches?.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.is_demo ? "[DEMO] " : ""}
-                    {m.player1.name} vs {m.player2.name} — {new Date(m.scheduled_at).toLocaleString()}
+                    {m.player1.name} vs {m.player2.name} — {fmtTime(m.scheduled_at, tz)}
                   </option>
                 ))}
               </select>
@@ -339,8 +339,8 @@ function BetForm({ onClose, prefill, onRecorded }: { onClose: () => void; prefil
                     <input className="inp w-full num" value={simProb} onChange={(e) => setSimProb(e.target.value)} placeholder="55" />
                   </Field>
                   <div className="flex items-end">
-                    <button type="button" className="btn w-full" onClick={runSim}>
-                      Simulate
+                    <button type="button" className="btn w-full" onClick={runSim} disabled={simBankroll === ""}>
+                      {simBankroll === "" ? "Loading bankroll…" : "Simulate"}
                     </button>
                   </div>
                 </div>

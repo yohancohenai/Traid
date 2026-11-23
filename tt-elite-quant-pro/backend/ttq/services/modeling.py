@@ -18,7 +18,7 @@ from ttq.features.builder import FeatureBuilder, MatchRecord, build_dataset, dat
 from ttq.ml.train import TrainedModel, logit, sigmoid, train_all
 from ttq.models import Match, ModelVersion, OddsQuote, Player, Prediction, RatingSnapshot
 from ttq.odds.math import no_vig_multiplicative
-from ttq.services.app_settings import get_setting
+from ttq.services.app_settings import get_filters, get_setting
 from ttq.services.audit import audit
 from ttq.sim.tt import full_match_model
 
@@ -244,7 +244,7 @@ def predict_upcoming(db: Session, is_demo: bool, horizon_hours: int = 48) -> dic
     champ: TrainedModel = models[mv.name]
     p = champ.predict(up)
     comps = {c: models[c].predict(up) for c in COMPONENTS if c in models}
-    scale = get_setting(db, "filters")["uncertainty_scale"]
+    scale = get_filters(db, is_demo)["uncertainty_scale"]
     n = 0
     for i, (_, r) in enumerate(up.iterrows()):
         cp = {c: float(v[i]) for c, v in comps.items()}

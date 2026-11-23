@@ -12,6 +12,10 @@ record the bets you actually place. It tracks results, settlement, P/L and bankr
 **Read first:** [docs/LIMITATIONS.md](docs/LIMITATIONS.md) · [docs/DATA_PROVIDERS.md](docs/DATA_PROVIDERS.md) ·
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/RUNBOOK.md](docs/RUNBOOK.md)
 
+## Screenshots (DEMO mode)
+![Overview](docs/screenshots/overview.png)
+![Opportunities](docs/screenshots/opportunities.png)
+
 ## Data status
 No TT Elite Series data provider could be verified during the build (see DATA_PROVIDERS.md). Out of the box the app
 runs a **DEMO** synthetic world: it is labelled DEMO everywhere, and it is stored and computed separately from live data.
@@ -44,9 +48,9 @@ cd ../frontend && cp .env.example .env.local && npm install && npm run dev
 
 ## Tests
 ```bash
-cd backend && createdb ttq_test && pytest          # uses TTQ_TEST_DATABASE_URL or the local ttq_test db
+cd backend && createdb ttq_test && pytest          # 68 tests; uses TTQ_TEST_DATABASE_URL or the local ttq_test db
 cd frontend && npm run build && npm start &        # then:
-npx playwright test --trace off                    # needs the API on :8000 with DEMO data seeded
+npx playwright test --trace off                    # 12 e2e tests; needs the API on :8000 with DEMO data seeded
 ```
 
 ## Deployment

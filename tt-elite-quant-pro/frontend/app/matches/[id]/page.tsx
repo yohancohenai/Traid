@@ -174,7 +174,7 @@ export default function MatchDetailPage() {
                 {[...data.quotes].reverse().map((q) => (
                   <tr key={q.id}>
                     <td>
-                      <Time iso={q.captured_at} />
+                      <Time iso={q.captured_at} /> <DemoBadge show={q.is_demo} />
                     </td>
                     <td>
                       {q.bookmaker === "hardrock" ? "Hard Rock Bet" : q.bookmaker === "draftkings" ? "DraftKings" : q.bookmaker}{" "}
@@ -231,7 +231,8 @@ export default function MatchDetailPage() {
                     <td>
                       <Link className="hover:text-accent" href={`/matches/${x.id}`}>
                         {x.player1.name} vs {x.player2.name}
-                      </Link>
+                      </Link>{" "}
+                      <DemoBadge show={x.is_demo} />
                     </td>
                     <td className="r num">
                       {x.sets_p1}-{x.sets_p2}

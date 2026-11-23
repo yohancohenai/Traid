@@ -12,6 +12,7 @@ DEFAULTS: dict[str, dict] = {
     # period, never the untouched test period.
     "filters": {
         "min_ev": 0.03,              # estimated EV per unit
+        "max_ev": 0.25,              # larger edges are far more likely a bad price / data error -> WATCH
         "min_ev_low": 0.0,           # EV at the lower end of the probability interval
         "min_edge": 0.02,            # model prob - no-vig market prob
         "min_data_quality": "MEDIUM",
@@ -47,9 +48,22 @@ DEFAULTS: dict[str, dict] = {
 QUALITY_ORDER = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
 
 
+def filters_key(is_demo: bool) -> str:
+    """Research filters are kept per data mode so tuning on DEMO data never changes LIVE thresholds."""
+    return "filters_demo" if is_demo else "filters"
+
+
+def get_filters(db: Session, is_demo: bool) -> dict:
+    return get_setting(db, filters_key(is_demo))
+
+
+def _defaults(key):
+    return DEFAULTS.get("filters" if key == "filters_demo" else key, {})
+
+
 def get_setting(db: Session, key: str) -> dict:
     row = db.get(AppSetting, key)
-    out = copy.deepcopy(DEFAULTS.get(key, {}))
+    out = copy.deepcopy(_defaults(key))
     if row:
         out.update(row.value)
     return out
@@ -57,8 +71,8 @@ def get_setting(db: Session, key: str) -> dict:
 
 def set_setting(db: Session, key: str, value: dict) -> dict:
     cur = get_setting(db, key)
-    unknown = set(value) - set(DEFAULTS.get(key, {}))
-    if key in DEFAULTS and unknown:
+    unknown = set(value) - set(_defaults(key))
+    if _defaults(key) and unknown:
         raise ValueError(f"unknown setting fields: {sorted(unknown)}")
     cur.update(value)
     row = db.get(AppSetting, key)

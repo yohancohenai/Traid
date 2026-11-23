@@ -109,3 +109,29 @@ def test_unchanged_price_refreshes_freshness_without_duplicate_rows(f, db):
     p.price = -120
     ingest_odds(db, p, utcnow())
     assert db.query(OddsQuote).count() == 2
+
+
+def test_demo_filter_selection_does_not_change_live_filters(db, client):
+    from ttq.services.app_settings import get_filters, set_setting, filters_key
+    set_setting(db, filters_key(True), {"min_ev": 0.11})
+    assert get_filters(db, True)["min_ev"] == 0.11
+    assert get_filters(db, False)["min_ev"] == 0.03
+
+
+def test_qualifying_count_independent_of_status_filter(f, db, client):
+    from ttq.services.app_settings import set_setting
+    set_setting(db, "filters", {"min_player_matches": 0})
+    _setup(f, db, p1=0.62)
+    scan(db); db.commit()
+    r = client.get("/api/opportunities?status=PASS").json()
+    assert r["qualifying"] == 1 and r["message"] is None
+
+
+def test_implausible_ev_never_qualifies(f, db):
+    from ttq.services.app_settings import set_setting
+    set_setting(db, "filters", {"min_player_matches": 0, "max_model_disagreement": 1})
+    _setup(f, db, p1=0.85, hr=(+150, -200))   # EV = 0.85*2.5-1 = +112%
+    scan(db)
+    r = [x for x in db.query(Recommendation).all() if x.selection == "p1"][0]
+    assert r.status == "WATCH" and r.filter_results["plausible_ev"] is False
+    assert any("implausibly large" in s for s in r.reasons_against)

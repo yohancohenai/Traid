@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { getToken, setToken } from "@/lib/api";
 import { AppProvider, useApp } from "@/lib/app-context";
 import { AlertsBell } from "./alerts-bell";
@@ -28,19 +28,22 @@ function isActive(path: string, href: string) {
   return href === "/" ? path === "/" : path === href || path.startsWith(href + "/");
 }
 
+const noopSubscribe = () => () => undefined;
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
-  const [authed, setAuthed] = useState<boolean | null>(null);
   const isLogin = path === "/login";
+  // null on the server, token presence on the client
+  const authed = useSyncExternalStore(
+    noopSubscribe,
+    () => !!getToken(),
+    () => null,
+  );
 
   useEffect(() => {
-    if (isLogin) return;
-    if (!getToken()) {
-      router.replace(`/login?next=${encodeURIComponent(path)}`);
-      setAuthed(false);
-    } else setAuthed(true);
-  }, [isLogin, path, router]);
+    if (!isLogin && authed === false) router.replace(`/login?next=${encodeURIComponent(path)}`);
+  }, [isLogin, authed, path, router]);
 
   if (isLogin) return <>{children}</>;
   if (!authed) return <div className="p-8 text-center text-xs text-sub">Checking session…</div>;
@@ -83,8 +86,6 @@ function Frame({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
-
-  useEffect(() => setMenuOpen(false), [path]);
 
   const logout = () => {
     setToken(null);
@@ -148,6 +149,7 @@ function Frame({ children }: { children: React.ReactNode }) {
                 <Link
                   key={n.href}
                   href={n.href}
+                  onClick={() => setMenuOpen(false)}
                   className={cx("rounded px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider", isActive(path, n.href) ? "bg-sky-500/10 text-ink" : "text-sub")}
                 >
                   {n.label}

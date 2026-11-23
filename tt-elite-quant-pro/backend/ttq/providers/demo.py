@@ -202,7 +202,7 @@ class DemoResultsProvider(ResultsProvider):
 
 
 def _book_quotes(m, book, margin, noise, now, r, kind):
-    lt = math.log(m["p_true"] / (1 - m["p_true"])) + r.normal(0, noise)
+    lt = math.log(m["p_true"] / (1 - m["p_true"])) + noise  # `noise` is the realised logit shift
     p = 1 / (1 + math.exp(-lt))
     # apply margin with power-like skew
     k = 1.0
@@ -237,11 +237,15 @@ class DemoOddsProvider(OddsProvider):
     def quotes_for(self, m, at: datetime, opening=False) -> list[ProviderQuote]:
         A, B = self.world.players[m["a"]], self.world.players[m["b"]]
         hours_out = max((m["sched"] - at).total_seconds() / 3600, 0)
-        noise = 0.38 if opening else 0.16 + 0.012 * min(hours_out, 18)
+        # Persistent per-(match, book) market error that shrinks towards start, plus small per-update noise,
+        # so prices drift instead of jumping independently every update.
+        base_sd = 0.30 if opening else 0.12 + 0.01 * min(hours_out, 18)
         res = []
         for book, (margin, nm) in self.BOOKS.items():
+            z_base = float(_rng(self.world.seed, "odds-base", m["ref"], book).normal())
             r = _rng(self.world.seed, "odds", m["ref"], book, "open" if opening else int(at.timestamp() // 1800))
-            for sel, dec in _book_quotes(m, book, margin, noise * nm, at, r, "open" if opening else "cur"):
+            shift = nm * (base_sd * z_base + float(r.normal(0, 0.05)))
+            for sel, dec in _book_quotes(m, book, margin, shift, at, r, "open" if opening else "cur"):
                 res.append(ProviderQuote(event_ref=m["ref"], match_source_ref=m["ref"], p1_name=A["name"],
                                          p2_name=B["name"], commence_time=m["sched"], bookmaker_key=book,
                                          market="match_winner", selection=sel, decimal_odds=dec,

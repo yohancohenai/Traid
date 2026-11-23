@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { PlayerRef } from "@/lib/types";
 
 /** Searchable select over a provided player list. */
@@ -9,7 +9,12 @@ export function PlayerPicker({ players, value, onChange, label, testId }: { play
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
 
-  useEffect(() => setQ(value?.name || ""), [value]);
+  const [prev, setPrev] = useState(value);
+  const listId = useId();
+  if (prev !== value) {
+    setPrev(value);
+    if (value) setQ(value.name);
+  }
   useEffect(() => {
     if (!open) return;
     const h = (e: MouseEvent) => {
@@ -30,6 +35,7 @@ export function PlayerPicker({ players, value, onChange, label, testId }: { play
         className="inp w-full"
         data-testid={testId}
         role="combobox"
+        aria-controls={listId}
         aria-expanded={open}
         aria-label={label}
         placeholder="Search player…"
@@ -42,7 +48,7 @@ export function PlayerPicker({ players, value, onChange, label, testId }: { play
         }}
       />
       {open && (
-        <ul role="listbox" className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-line2 bg-panel shadow-xl">
+        <ul id={listId} role="listbox" className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-line2 bg-panel shadow-xl">
           {list.length === 0 && <li className="px-2 py-1.5 text-xs text-sub">No match</li>}
           {list.map((p) => (
             <li

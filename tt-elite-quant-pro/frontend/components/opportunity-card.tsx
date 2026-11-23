@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { api } from "@/lib/api";
-import { american, dec, isNum, marketLabel, pct } from "@/lib/format";
+import { american, dec, isNum, keyLabel, marketLabel, pct } from "@/lib/format";
 import type { Recommendation } from "@/lib/types";
 import { Badge, DemoBadge, EvValue, FreshnessBadge, KV, StatusBadge, Time, cx } from "./ui";
 
@@ -127,7 +127,7 @@ export function OpportunityCard({ r, onBet, onChanged }: { r: Recommendation; on
               className={cx("rounded border px-1.5 py-[1px] text-[10px] font-semibold uppercase tracking-wider", ok ? "border-sky-500/30 text-sky-300" : "border-slate-600 text-slate-500 line-through")}
               title={ok ? "filter passed" : "filter failed"}
             >
-              {ok ? "✓" : "✗"} {k.replace(/_/g, " ")}
+              {ok ? "✓" : "✗"} {keyLabel(k)}
             </span>
           ))}
         </div>

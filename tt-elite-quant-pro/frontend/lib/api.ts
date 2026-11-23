@@ -65,7 +65,7 @@ function onUnauthorized() {
   setToken(null);
   if (typeof window !== "undefined" && window.location.pathname !== "/login") {
     const next = encodeURIComponent(window.location.pathname);
-    window.location.href = `/login?next=${next}`;
+    window.location.replace(`/login?next=${next}`);
   }
 }
 

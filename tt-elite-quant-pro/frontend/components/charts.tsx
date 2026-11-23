@@ -56,12 +56,18 @@ export function TimeLineChart({
 }) {
   const { tz } = useApp();
   if (!data.length) return <div className="py-8 text-center text-xs text-sub">No data yet.</div>;
+  const ts = data.map((d) => Number(d.t)).filter(Number.isFinite);
+  const short = ts.length > 0 && Math.max(...ts) - Math.min(...ts) < 2 * 86400_000;
+  const tick = (v: number) => {
+    const iso = new Date(v).toISOString();
+    return short ? fmtTime(iso, tz, false) : fmtTime(iso, tz).replace(/,.*/, "");
+  };
   return (
     <div style={{ height }} className="w-full">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 6, right: 12, bottom: 0, left: 0 }}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" />
-          <XAxis dataKey="t" type="number" scale="time" domain={["dataMin", "dataMax"]} {...AXIS} tickFormatter={(v: number) => fmtTime(new Date(v).toISOString(), tz).replace(/,.*/, "")} minTickGap={30} />
+          <XAxis dataKey="t" type="number" scale="time" domain={["dataMin", "dataMax"]} {...AXIS} tickFormatter={tick} minTickGap={30} />
           <YAxis {...AXIS} width={56} tickFormatter={yFmt} domain={yDomain || ["auto", "auto"]} />
           <Tooltip {...TT} labelFormatter={(v) => fmtTime(new Date(Number(v)).toISOString(), tz)} formatter={(v) => (typeof v === "number" ? yFmt(v) : String(v))} />
           {lines.length > 1 && <Legend wrapperStyle={{ fontSize: 11 }} />}

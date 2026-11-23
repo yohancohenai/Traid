@@ -96,3 +96,11 @@ export function nowLocalInput(): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+
+/** Human label for a backend key; never shows bare "EV" (always "Estimated EV"). */
+export function keyLabel(k: string): string {
+  return k
+    .replace(/_/g, " ")
+    .replace(/\bev\b/gi, "Estimated EV")
+    .trim();
+}

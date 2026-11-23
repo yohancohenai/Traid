@@ -50,7 +50,7 @@ export function Card({
 
 /** Horizontal-scroll container for dense tables inside a card. */
 export function TableWrap({ children, maxH }: { children: React.ReactNode; maxH?: string }) {
-  return <div className={cx("-mx-3 -my-3 overflow-x-auto", maxH && "overflow-y-auto")} style={maxH ? { maxHeight: maxH } : undefined}>{children}</div>;
+  return <div className={cx("-mx-3 overflow-x-auto first:-mt-3 last:-mb-3", maxH && "overflow-y-auto")} style={maxH ? { maxHeight: maxH } : undefined}>{children}</div>;
 }
 
 const BADGE_TONES: Record<string, string> = {
@@ -169,7 +169,7 @@ export function Notice({ tone = "gray", children }: { tone?: "gray" | "amber" | 
 export function Kpi({ label, value, sub, valueClass, testId }: { label: string; value: React.ReactNode; sub?: React.ReactNode; valueClass?: string; testId?: string }) {
   return (
     <div data-testid={testId} className="min-w-0 rounded-lg border border-line bg-panel px-3 py-2">
-      <div className="truncate text-[10px] font-semibold uppercase tracking-wider text-sub">{label}</div>
+      <div className="text-[10px] font-semibold uppercase leading-tight tracking-wider text-sub">{label}</div>
       <div className={cx("num mt-0.5 truncate text-base font-semibold", valueClass)}>{value}</div>
       {sub && <div className="num truncate text-[11px] text-dim">{sub}</div>}
     </div>

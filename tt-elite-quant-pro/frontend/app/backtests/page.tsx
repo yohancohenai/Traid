@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { IndexLineChart, ReliabilityChart } from "@/components/charts";
-import { Card, Empty, ErrorBox, Field, Loading, Notice, PageHeader, StatusBadge, TableWrap, Time, cx } from "@/components/ui";
+import { Card, DemoBadge, Empty, ErrorBox, Field, Loading, Notice, PageHeader, StatusBadge, TableWrap, Time, cx } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useApp } from "@/lib/app-context";
 import { dec, isNum, num, pct, signClass, signedPct } from "@/lib/format";
@@ -68,11 +68,8 @@ const STRATS = ["model", "elo_only", "glicko_only", "market_consensus", "novig"]
 export default function BacktestsPage() {
   const { demo } = useApp();
   const list = useApi<BtListRow[]>("/api/backtests", { demo });
-  const [sel, setSel] = useState<number | null>(null);
-  useEffect(() => {
-    if (list.data && list.data.length && (sel == null || !list.data.some((r) => r.id === sel))) setSel(list.data[0].id);
-    if (list.data && !list.data.length) setSel(null);
-  }, [list.data, sel]);
+  const [picked, setSel] = useState<number | null>(null);
+  const sel = picked != null && list.data?.some((r) => r.id === picked) ? picked : (list.data?.[0]?.id ?? null);
 
   return (
     <div className="space-y-3">
@@ -262,7 +259,7 @@ function BacktestDetail({ id }: { id: number }) {
 
   return (
     <div className="space-y-3">
-      <Card title={`Run #${data.id} — ${data.name}`} right={<StatusBadge status={data.outcome} />}>
+      <Card title={`Run #${data.id} — ${data.name}`} right={<><DemoBadge show={data.is_demo} /><StatusBadge status={data.outcome} /></>}>
         {m.demo_warning && <div className="mb-2"><Notice tone="amber">{m.demo_warning}</Notice></div>}
         <div className="grid gap-2 text-xs sm:grid-cols-4">
           <div>

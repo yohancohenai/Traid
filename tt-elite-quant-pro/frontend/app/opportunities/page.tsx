@@ -5,6 +5,7 @@ import { BetModal, type BetPrefill } from "@/components/bet-modal";
 import { OpportunityCard, recToPrefill } from "@/components/opportunity-card";
 import { Card, ErrorBox, Loading, PageHeader, Tabs } from "@/components/ui";
 import { useApp } from "@/lib/app-context";
+import { keyLabel } from "@/lib/format";
 import { useApi } from "@/lib/hooks";
 import type { Recommendation } from "@/lib/types";
 
@@ -24,7 +25,7 @@ export default function OpportunitiesPage() {
   const [shown, setShown] = useState(PAGE);
   const [prefill, setPrefill] = useState<BetPrefill | null>(null);
   const recorded = useRef(false);
-  const { data, error, loading, reload } = useApi<OppResp>("/api/opportunities", { demo, status: filter === "ALL" ? undefined : filter });
+  const { data, error, loading, reload } = useApi<OppResp>("/api/opportunities", { demo, status: filter === "ALL" ? undefined : filter, limit: 200 });
 
   const showNoQualifying = data && data.qualifying === 0 && (filter === "ALL" || filter === "QUALIFIES");
 
@@ -73,7 +74,7 @@ export default function OpportunitiesPage() {
               <div className="mt-1 flex flex-wrap gap-1">
                 {Object.entries(data.filters || {}).map(([k, v]) => (
                   <span key={k} className="num rounded bg-panel2 px-1.5 py-0.5 text-[10px]">
-                    {k}: {String(v)}
+                    {keyLabel(k)}: {String(v)}
                   </span>
                 ))}
               </div>

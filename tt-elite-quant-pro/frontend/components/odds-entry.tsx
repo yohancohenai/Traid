@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useApp } from "@/lib/app-context";
-import { american, dec, marketLabel } from "@/lib/format";
+import { american, dec, fmtTime, marketLabel } from "@/lib/format";
 import type { MatchBrief, MatchWithPred, Quote } from "@/lib/types";
 import { MARKETS } from "./bet-modal";
 import { Card, DemoBadge, FreshnessBadge, Field, Notice, TableWrap, Time } from "./ui";
@@ -22,7 +22,7 @@ const validAm = (s: string) => {
 
 /** FAST MANUAL HARD ROCK ENTRY — POST /api/odds/manual (array body). */
 export function ManualOddsEntry({ fixedMatch, onStored }: { fixedMatch?: MatchBrief | null; onStored?: () => void }) {
-  const { demo } = useApp();
+  const { demo, tz } = useApp();
   const [matches, setMatches] = useState<MatchWithPred[] | null>(null);
   const [matchId, setMatchId] = useState<number | "">(fixedMatch?.id ?? "");
   const [a1, setA1] = useState("");
@@ -95,7 +95,7 @@ export function ManualOddsEntry({ fixedMatch, onStored }: { fixedMatch?: MatchBr
               {matches?.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.is_demo ? "[DEMO] " : ""}
-                  {m.player1.name} vs {m.player2.name} — {new Date(m.scheduled_at).toLocaleString()}
+                  {m.player1.name} vs {m.player2.name} — {fmtTime(m.scheduled_at, tz)}
                 </option>
               ))}
             </select>

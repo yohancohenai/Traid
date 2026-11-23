@@ -19,7 +19,7 @@ from ttq.core.timeutil import utcnow
 from ttq.ml.train import brier, log_loss, reliability
 from ttq.models import BacktestRun, Match, ModelVersion, OddsQuote, PaperTrade, Prediction
 from ttq.odds.math import clv, expected_value, no_vig_multiplicative
-from ttq.services.app_settings import get_setting, set_setting
+from ttq.services.app_settings import filters_key, get_filters, set_setting
 from ttq.services.audit import audit
 
 
@@ -98,7 +98,7 @@ def _simulate(df: pd.DataFrame, F: dict, slippage: float, strategy: str = "model
             exec_dec = 1 + (dec - 1) * (1 - slippage)
             ev = expected_value(p, exec_dec)
             ev_lo = expected_value(lo, exec_dec)
-            if ev < F["min_ev"] or (p - nv[idx]) < F["min_edge"] or not (F["min_decimal_odds"] <= exec_dec <= F["max_decimal_odds"]):
+            if ev < F["min_ev"] or ev > F.get("max_ev", 0.25) or (p - nv[idx]) < F["min_edge"] or not (F["min_decimal_odds"] <= exec_dec <= F["max_decimal_odds"]):
                 continue
             if strategy == "model" and (ev_lo < F["min_ev_low"] or spread > F["max_model_disagreement"]
                                         or (F["min_data_quality"] == "HIGH" and r.dq != "HIGH")
@@ -149,7 +149,7 @@ def _metrics(trades: pd.DataFrame, n_boot: int = 1000, seed: int = 0) -> dict:
 def run_backtest(db: Session, is_demo: bool, name: str = "walk-forward", filters: dict | None = None,
                  slippage: float = 0.01, decision_minutes: int = 30, delay_minutes: int = 2,
                  period: str = "test", store_trades: bool = True) -> dict:
-    F = {**get_setting(db, "filters"), **(filters or {})}
+    F = {**get_filters(db, is_demo), **(filters or {})}
     champ = db.scalar(select(ModelVersion).where(ModelVersion.status == "CHAMPION", ModelVersion.is_demo == is_demo))
     if not champ:
         return {"status": "NO_MODEL"}
@@ -220,7 +220,7 @@ def select_filters(db: Session, is_demo: bool, actor: str = "system") -> dict:
         return {"status": "NO_MODEL"}
     sp = champ.splits["calib"]
     df = _load(db, is_demo, sp["start"], sp["end"])
-    base = get_setting(db, "filters")
+    base = get_filters(db, is_demo)
     for ev, ed in grid:
         F = {**base, "min_ev": ev, "min_edge": ed}
         m = _metrics(_simulate(df, F, 0.01, "model"), n_boot=300)
@@ -230,6 +230,6 @@ def select_filters(db: Session, is_demo: bool, actor: str = "system") -> dict:
             best_score, best = lo, (ev, ed)
     if best is None:
         return {"status": "NO_CANDIDATE", "grid": table}
-    set_setting(db, "filters", {"min_ev": best[0], "min_edge": best[1], "selected_by": f"calib-period grid ({sp['start'][:10]}..{sp['end'][:10]})"})
+    set_setting(db, filters_key(is_demo), {"min_ev": best[0], "min_edge": best[1], "selected_by": f"calib-period grid ({sp['start'][:10]}..{sp['end'][:10]})"})
     audit(db, actor, "filters_selected", "app_settings", "filters", choice=best, score=best_score)
     return {"status": "OK", "chosen": {"min_ev": best[0], "min_edge": best[1]}, "grid": table}

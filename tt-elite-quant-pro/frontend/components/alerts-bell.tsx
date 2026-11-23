@@ -3,18 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type { Alert } from "@/lib/types";
+import { useApp } from "@/lib/app-context";
 import { Badge, DemoBadge, Time, cx } from "./ui";
 
 export function AlertsBell() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [open, setOpen] = useState(false);
-  const [perm, setPerm] = useState<string>("default");
+  const [perm, setPerm] = useState<string>(() => (typeof Notification !== "undefined" ? Notification.permission : "default"));
   const seen = useRef<Set<number> | null>(null);
   const box = useRef<HTMLDivElement>(null);
+  const { demo } = useApp();
 
   const poll = useCallback(async () => {
     try {
-      const a = await api<Alert[]>("/api/alerts", { query: { unread: true, limit: 50 } });
+      const a = await api<Alert[]>("/api/alerts", { query: { unread: true, limit: 50, demo } });
       setAlerts(a);
       if (seen.current === null) {
         seen.current = new Set(a.map((x) => x.id));
@@ -34,13 +36,15 @@ export function AlertsBell() {
     } catch {
       /* polling errors are non-fatal */
     }
-  }, []);
+  }, [demo]);
 
   useEffect(() => {
-    if (typeof Notification !== "undefined") setPerm(Notification.permission);
-    poll();
+    const first = setTimeout(poll, 0);
     const t = setInterval(poll, 60_000);
-    return () => clearInterval(t);
+    return () => {
+      clearTimeout(first);
+      clearInterval(t);
+    };
   }, [poll]);
 
   useEffect(() => {
@@ -53,7 +57,7 @@ export function AlertsBell() {
   }, [open]);
 
   const readAll = async () => {
-    await api("/api/alerts/read-all", { method: "POST" }).catch(() => undefined);
+    await api("/api/alerts/read-all", { method: "POST", query: { demo } }).catch(() => undefined);
     poll();
   };
 

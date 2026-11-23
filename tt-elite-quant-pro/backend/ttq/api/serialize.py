@@ -59,7 +59,7 @@ def pred_out(p: Prediction | None) -> dict | None:
 def rec_out(db: Session, r: Recommendation) -> dict:
     m = db.get(Match, r.match_id)
     q = db.get(OddsQuote, r.quote_id) if r.quote_id else None
-    qo = quote_out(q, m, effective_max_age(db)) if q else None
+    qo = quote_out(q, m, effective_max_age(db, r.is_demo)) if q else None
     sel_name = m.player1.canonical_name if r.selection == "p1" else m.player2.canonical_name if r.selection == "p2" else r.selection
     return {"id": r.id, "match": match_brief(m), "market": r.market, "selection": r.selection, "selection_name": sel_name,
             "line": r.line, "sportsbook": "Hard Rock Bet", "decimal_odds": r.decimal_odds,
