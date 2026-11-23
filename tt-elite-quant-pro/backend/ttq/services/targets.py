@@ -111,3 +111,75 @@ def price_targets_job(db: Session) -> dict:
     a = raise_alert(db, "price_targets", f"Price targets: {len(d['match_ids'])} upcoming match(es)", d["text"],
                     f"targets:{utcnow():%Y%m%d%H%M}:{','.join(map(str, d['match_ids']))}", "INFO", False)
     return {"sent": len(d["match_ids"]), "channels": a.channels_sent if a else []}
+
+
+def build_picks(db: Session, now: datetime | None = None) -> list[dict]:
+    """Strongest conditional picks for live matches starting soon. One side per match, each match once, capped per
+    local day. Returns [{"match", "pred", "side", "p", "min_american"}]."""
+    cfg = get_setting(db, "alerts")
+    if not cfg.get("conditional_picks", True):
+        return []
+    now = now or utcnow()
+    F = get_filters(db, False)
+    lo_min, hi_min = int(cfg.get("picks_min_minutes", 10)), int(cfg.get("picks_max_minutes", 45))
+    max_width = float(cfg.get("picks_max_interval", 0.135))
+    tz = ZoneInfo(get_setting(db, "display").get("timezone") or get_settings().user_timezone)
+    sent_row = db.get(AppSetting, "picks_sent")
+    sent = {k: v for k, v in (sent_row.value if sent_row else {}).items()
+            if datetime.fromisoformat(v) > now - timedelta(days=2)}
+    today = now.astimezone(tz).date()
+    sent_today = sum(1 for v in sent.values() if datetime.fromisoformat(v).astimezone(tz).date() == today)
+    room = int(cfg.get("picks_max_per_day", 10)) - sent_today
+    if room <= 0:
+        return []
+    ms = db.scalars(select(Match).where(Match.is_demo.is_(False), Match.status == "SCHEDULED",
+                                        Match.scheduled_at >= now + timedelta(minutes=lo_min),
+                                        Match.scheduled_at <= now + timedelta(minutes=hi_min))
+                    .order_by(Match.scheduled_at)).all()
+    cands = []
+    for m in ms:
+        if str(m.id) in sent:
+            continue
+        pred = latest_prediction(db, m.id)
+        if not pred or pred.data_quality != "HIGH":
+            continue
+        width = pred.p1_ci_high - pred.p1_ci_low
+        f = pred.features or {}
+        comps = list((pred.component_probs or {}).values()) or [pred.p1_win]
+        if width > max_width or min(f.get("_n1") or 0, f.get("_n2") or 0) < F["min_player_matches"] \
+                or max(comps) - min(comps) > F["max_model_disagreement"]:
+            continue
+        best = None
+        for side, p, lo in (("p1", pred.p1_win, pred.p1_ci_low), ("p2", 1 - pred.p1_win, 1 - pred.p1_ci_high)):
+            t = side_target(p, lo, F)
+            if t is None:
+                continue
+            premium = t * p            # how far above the model's own fair price the minimum sits
+            if best is None or premium < best[0]:
+                best = (premium, side, p, round_up_american(t))
+        if best:
+            cands.append((width, m, pred, best))
+    cands.sort(key=lambda c: (c[0], c[1].scheduled_at))
+    picks = []
+    for width, m, pred, (_, side, p, am) in cands[:room]:
+        picks.append({"match": m, "pred": pred, "side": side, "p": p, "min_american": am})
+        sent[str(m.id)] = now.isoformat()
+    if picks:
+        if sent_row:
+            sent_row.value = sent
+        else:
+            db.add(AppSetting(key="picks_sent", value=sent))
+        db.flush()
+    return picks
+
+
+def picks_job(db: Session) -> dict:
+    from ttq.services.alerts import raise_alert
+    from ttq.services.messages import conditional_pick_text
+    out = []
+    for pk in build_picks(db):
+        m = pk["match"]
+        title, body = conditional_pick_text(db, m, pk["pred"], pk["side"], pk["p"], pk["min_american"])
+        a = raise_alert(db, "pick", title, body, f"pick:{m.id}", "INFO", False, rate_limited=False)
+        out.append({"match_id": m.id, "side": pk["side"], "min": pk["min_american"], "channels": a.channels_sent if a else []})
+    return {"sent": len(out), "picks": out}

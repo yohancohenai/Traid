@@ -83,6 +83,11 @@ or the model needs attention.
    A test message should arrive. If it says `failed: HTTP 401`, the token is wrong; `HTTP 400 chat not found` means
    the chat id is wrong or you haven't messaged the bot yet.
 
+**Conditional picks (no screenshot needed):** up to 10 a day, for the strongest matches (high data quality, tightest
+uncertainty), 10–45 minutes before start, in the "New Bet Recommendation" layout with a line like
+`Bet only if Hard Rock odds >= +135`. Check the price in Hard Rock and bet only if it is at least that. Tune or turn
+off in Settings → Alerts (`conditional_picks`, `picks_max_per_day`, `picks_max_interval`).
+
 Price targets are the **minimum** Hard Rock price at which a side would pass your filters (Settings → Filters),
 rounded conservatively. They are not tips: check Hard Rock, upload a screenshot, and let the scanner confirm. Turn
 them off or change how many you get in Settings → Alerts (`price_targets`, `price_targets_max`).

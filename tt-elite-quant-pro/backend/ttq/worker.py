@@ -18,6 +18,11 @@ def _targets_job(db):
     return price_targets_job(db)
 
 
+def _picks_job(db):
+    from ttq.services.targets import picks_job
+    return picks_job(db)
+
+
 # (job id, function, interval minutes, startup delay seconds)
 INTERVAL_JOBS = [
     ("ingest_results", jobs.ingest_results_job, 10, 0),
@@ -26,6 +31,7 @@ INTERVAL_JOBS = [
     ("predict_scan", jobs.predict_scan_job, 5, 60),   # after fresh results
     ("monitor", jobs.monitor_job, 10, 90),
     ("price_targets", _targets_job, 30, 120),  # after fresh predictions
+    ("picks", _picks_job, 5, 150),             # conditional picks, strongest only
 ]
 
 
