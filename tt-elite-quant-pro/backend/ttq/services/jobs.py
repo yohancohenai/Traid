@@ -86,9 +86,10 @@ def backfill_ttseries(from_id: int, to_id: int | None = None, stop_after_empty: 
         stats["fetched"] += 1
         if not ms:
             stats["empty"] += 1
-            empties += 1
-            if empties >= stop_after_empty:
-                break
+            if stats["matches"]:  # leading gaps (ids that never existed) are not the end of the archive
+                empties += 1
+                if empties >= stop_after_empty:
+                    break
             continue
         empties = 0
         with session_scope() as db:
