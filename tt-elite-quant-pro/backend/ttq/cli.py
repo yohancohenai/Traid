@@ -9,7 +9,7 @@ from ttq.services import jobs
 def main():
     setup_logging()
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["backfill-ttseries", "seed-demo", "ingest", "predict", "settle", "monitor", "retrain", "train-force", "hash-password"])
+    ap.add_argument("cmd", choices=["test-alert", "price-targets", "backfill-ttseries", "seed-demo", "ingest", "predict", "settle", "monitor", "retrain", "train-force", "hash-password"])
     ap.add_argument("--fast", action="store_true")
     ap.add_argument("--live", action="store_true", help="operate on live (non-demo) data where applicable")
     ap.add_argument("--password")
@@ -19,6 +19,17 @@ def main():
     if a.cmd == "hash-password":
         import bcrypt
         print(bcrypt.hashpw(a.password.encode(), bcrypt.gensalt()).decode()); return
+    if a.cmd == "test-alert":
+        from ttq.services.alerts import send_test_alert
+        res = send_test_alert()
+        print(json.dumps(res, indent=2))
+        if "sent" not in res.values():
+            print("Nothing was sent. For Telegram set TTQ_TELEGRAM_BOT_TOKEN and TTQ_TELEGRAM_CHAT_ID in .env, then "
+                  "run: docker compose up -d --force-recreate api worker")
+        return
+    if a.cmd == "price-targets":
+        r = jobs.run_job("price_targets", lambda db: __import__("ttq.services.targets", fromlist=["x"]).price_targets_job(db))
+        print(json.dumps(r, indent=2, default=str)); return
     if a.cmd == "backfill-ttseries":
         print(json.dumps(jobs.backfill_ttseries(a.from_id, a.to_id), indent=2)); return
     if a.cmd == "seed-demo":

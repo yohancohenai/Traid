@@ -11,7 +11,7 @@ def test_data_jobs_run_at_startup_then_on_intervals():
     s.start(paused=True)
     try:
         jobs = {j.id: j for j in s.get_jobs()}
-        assert set(jobs) == {"ingest_results", "ingest_odds", "settle", "predict_scan", "monitor", "retrain"}
+        assert set(jobs) == {"ingest_results", "ingest_odds", "settle", "predict_scan", "monitor", "price_targets", "retrain"}
         order = ["ingest_results", "ingest_odds", "settle", "predict_scan", "monitor"]
         times = [jobs[k].next_run_time for k in order]
         assert times == sorted(times)

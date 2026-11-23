@@ -44,6 +44,20 @@ def _send_telegram(title, body):
     return True
 
 
+def send_test_alert() -> dict:
+    """Send a test message on every configured external channel, ignoring rate limits. Returns per-channel status."""
+    out = {}
+    title, body = "TT Elite Quant Pro: test alert ✅", "If you can read this, alerts reach you. No action needed."
+    for ch, fn in (("telegram", _send_telegram), ("email", _send_email)):
+        try:
+            out[ch] = "sent" if fn(title, body) else "not configured"
+        except httpx.HTTPStatusError as e:
+            out[ch] = f"failed: HTTP {e.response.status_code} {e.response.text[:200]}"
+        except Exception as e:  # noqa
+            out[ch] = f"failed: {e.__class__.__name__}: {e}"
+    return out
+
+
 def raise_alert(db: Session, kind: str, title: str, body: str, dedupe_key: str, severity: str = "INFO",
                 is_demo: bool = False) -> Alert | None:
     if db.scalar(select(Alert).where(Alert.dedupe_key == dedupe_key)):

@@ -36,9 +36,10 @@ DEFAULTS: dict[str, dict] = {
         "fixed_pct": 0.01,
     },
     "alerts": {
-        "email": False, "telegram": False, "browser": True,
+        "email": True, "telegram": True, "browser": True,  # external channels send only when configured in .env
         "min_interval_seconds": 120, "price_change_threshold": 0.05, "divergence_threshold": 0.12,
         "stale_provider_minutes": 30,
+        "price_targets": True, "price_targets_max": 8, "price_targets_window_minutes": 75,
     },
     "display": {"timezone": "America/New_York", "data_mode": "ALL"},
     "monitoring": {"drift_window": 300, "drift_logloss_tolerance": 0.02, "retrain_min_new_matches": 500,

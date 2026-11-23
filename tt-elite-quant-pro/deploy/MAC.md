@@ -62,6 +62,38 @@ TTQ_LAN=1 bash deploy/mac-start.sh
 It prints an address like `http://your-mac.local:3000`. Open that on your phone. Only devices on your home network can
 reach it. For access away from home, install **Tailscale** (free) on the Mac and the phone.
 
+## Telegram alerts (free)
+You get: **price targets** every 30 minutes for confident matches starting in the next hour ("Kurek 62%, only at +135
+or better"), plus alerts when a bet qualifies after a screenshot upload, when your bets settle, and when a data source
+or the model needs attention.
+1. In Telegram, chat with **@BotFather** → `/newbot` → copy the **token**. (If a token was ever shared, use
+   `/mybots` → your bot → API Token → **Revoke** and take the new one.)
+2. Send any message (e.g. "hi") to your new bot.
+3. Open `https://api.telegram.org/bot<TOKEN>/getUpdates` in a browser and copy the number after `"chat":{"id":`.
+4. In the `tt-elite-quant-pro` folder: `open -e .env` and add two lines, then save:
+   ```
+   TTQ_TELEGRAM_BOT_TOKEN=<token>
+   TTQ_TELEGRAM_CHAT_ID=<chat id>
+   ```
+5. Apply and test:
+   ```bash
+   docker compose up -d --force-recreate api worker
+   docker compose exec api python -m ttq.cli test-alert
+   ```
+   A test message should arrive. If it says `failed: HTTP 401`, the token is wrong; `HTTP 400 chat not found` means
+   the chat id is wrong or you haven't messaged the bot yet.
+
+Price targets are the **minimum** Hard Rock price at which a side would pass your filters (Settings → Filters),
+rounded conservatively. They are not tips: check Hard Rock, upload a screenshot, and let the scanner confirm. Turn
+them off or change how many you get in Settings → Alerts (`price_targets`, `price_targets_max`).
+
+## Updating to a new version
+1. Download the new ZIP from GitHub and unzip it.
+2. Copy `.env` and `.ttq-initialized` from your current `tt-elite-quant-pro` folder into the new one
+   (in Finder press ⌘⇧. to show hidden files).
+3. `cd` into the new `tt-elite-quant-pro` folder in Terminal and run `bash deploy/mac-start.sh`.
+Your data is kept (Docker stores it under the project name, which doesn't change). You can delete the old folder after.
+
 ## Useful commands (in the tt-elite-quant-pro folder)
 ```bash
 bash deploy/mac-start.sh                 # start / update after `git pull`
