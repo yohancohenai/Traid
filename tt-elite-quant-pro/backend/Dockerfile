@@ -13,4 +13,4 @@ RUN useradd -m ttq && mkdir -p /app/artifacts && chown -R ttq /app
 USER ttq
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import urllib.request;urllib.request.urlopen('http://localhost:8000/api/health')"
-CMD ["sh", "-c", "alembic upgrade head && uvicorn ttq.main:app --host 0.0.0.0 --port 8000 --workers 2"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn ttq.main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips='*'"]

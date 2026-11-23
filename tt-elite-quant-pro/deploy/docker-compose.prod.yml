@@ -1,0 +1,17 @@
+# Production overlay: adds Caddy (HTTPS) in front of api + frontend.
+# Usage: docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+services:
+  caddy:
+    image: caddy:2
+    ports: ["80:80", "443:443"]
+    environment:
+      TTQ_DOMAIN: ${TTQ_DOMAIN:?set TTQ_DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api, frontend]
+    restart: unless-stopped
+volumes:
+  caddy_data:
+  caddy_config:
