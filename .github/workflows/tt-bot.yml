@@ -55,7 +55,7 @@ jobs:
       - name: Install
         working-directory: tt-elite-quant-pro/backend
         run: |
-          sudo apt-get install -y --no-install-recommends libgomp1 >/dev/null
+          sudo apt-get install -y --no-install-recommends libgomp1 tesseract-ocr >/dev/null
           pip install -q -e .
 
       - name: Restore bot memory
