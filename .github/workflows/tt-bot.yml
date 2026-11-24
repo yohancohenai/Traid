@@ -1,12 +1,12 @@
 # TT Elite Quant Pro - always-on bot on GitHub's free servers (no laptop needed).
-# Every 30 minutes: fetch official tt-series.com results, retrain when due, predict, and send Telegram picks for
-# every match starting in the next 2 hours. Nothing is ever bet automatically.
+# Every 10 minutes: fetch official tt-series.com results, retrain when due, predict, and send Telegram picks for
+# each pick on its own, about 35 minutes before its match. Nothing is ever bet automatically.
 # The bot's memory (database + trained model) is saved in the Actions cache between runs.
 name: TT bot
 
 on:
   schedule:
-    - cron: "7,37 * * * *"     # every 30 min (off the hour: GitHub delays :00 runs most)
+    - cron: "3,13,23,33,43,53 * * * *"   # every 10 min (off the hour: GitHub delays :00 runs most)
   workflow_dispatch: {}
 
 concurrency:
@@ -75,7 +75,7 @@ jobs:
         working-directory: tt-elite-quant-pro/backend
         run: |
           alembic upgrade head
-          python -m ttq.cli cloud-run --window 120 | tail -c 6000
+          python -m ttq.cli cloud-run --window 35 --hold 8 | tail -c 6000
 
       - name: Save database
         if: always()
