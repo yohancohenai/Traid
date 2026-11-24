@@ -52,8 +52,8 @@ export function fmtTime(iso: string | null | undefined, tz: string, withDate = t
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "—";
   const opts: Intl.DateTimeFormatOptions = withDate
-    ? { timeZone: tz, month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }
-    : { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false };
+    ? { timeZone: tz, month: "short", day: "2-digit", hour: "numeric", minute: "2-digit", hour12: true }
+    : { timeZone: tz, hour: "numeric", minute: "2-digit", hour12: true };
   try {
     return new Intl.DateTimeFormat("en-US", opts).format(d);
   } catch {

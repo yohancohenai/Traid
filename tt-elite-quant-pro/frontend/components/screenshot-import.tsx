@@ -168,7 +168,7 @@ export function ScreenshotImport({ onStored }: { onStored?: () => void }) {
                           <option value="">— choose —</option>
                           {r.p.alternatives.map((a) => (
                             <option key={a.match_id} value={a.match_id}>
-                              {a.label} ({new Date(a.scheduled_at).toLocaleTimeString([], { timeZone: tz, hour: "2-digit", minute: "2-digit" })})
+                              {a.label} ({new Date(a.scheduled_at).toLocaleTimeString([], { timeZone: tz, hour: "numeric", minute: "2-digit", hour12: true })})
                             </option>
                           ))}
                         </select>

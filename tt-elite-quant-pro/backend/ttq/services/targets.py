@@ -89,7 +89,7 @@ def build_digest(db: Session, now: datetime | None = None) -> dict | None:
     tz = ZoneInfo(get_setting(db, "display").get("timezone") or get_settings().user_timezone)
     lines = ["TT Elite price targets (model estimates, not guarantees)"]
     for _, m, sides in chosen:
-        lines.append(f"{as_utc(m.scheduled_at).astimezone(tz):%H:%M}  {m.player1.canonical_name} vs {m.player2.canonical_name}")
+        lines.append(f"{as_utc(m.scheduled_at).astimezone(tz).strftime('%I:%M %p').lstrip('0')}  {m.player1.canonical_name} vs {m.player2.canonical_name}")
         for name, p, am in sides:
             lines.append(f"  {_short(name)} {p:.0%} -> only at {am:+d} or better")
     lines.append("Check Hard Rock; upload a screenshot to confirm before deciding. Never more than your limits.")
