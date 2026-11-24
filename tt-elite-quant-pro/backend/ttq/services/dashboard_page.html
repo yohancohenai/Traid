@@ -209,11 +209,22 @@ function render(d) {
     : `<div class="empty">No picks sent yet.</div>`;
   const up = d.upcoming.length ? `<div class="scroll"><table><thead><tr><th>Time</th><th>Match</th><th>Model lean</th><th class="r">Worth it at</th><th>Status</th></tr></thead><tbody>
       ${d.upcoming.map(u => `<tr><td>${esc(u.time)}</td><td>${esc(u.p1)} <span class="muted">vs</span> ${esc(u.p2)}</td>
-        <td>${u.lean ? `${esc(u.lean)} <span class="muted num">${pct(u.lean_prob)}</span>` : "–"}</td>
+        <td>${u.lean ? `${esc(u.lean)} <span class="muted num">${pct(u.lean_prob, 1)}</span>` : "–"}</td>
         <td class="r num">${u.min_price != null ? am(u.min_price) + " or better" : "–"}</td>
         <td><span class="chip ${u.status === "passes rules" ? "pass" : ""}">${esc(u.status)}</span></td></tr>`).join("")}</tbody></table></div>`
     : `<div class="empty">No matches in the next 3 hours.</div>`;
-  $("#app").innerHTML = `${head}<main>${kpis}${chart}${statsCard}
+  const L = d.learning || {}, last = L.last;
+  const learnCard = `<section class="card"><h3>Bot learning <span>daily self-check against real results</span></h3>
+    ${last ? `<div class="split">
+      <div class="row"><span>Pick rule now</span><span class="num"><b>favorites at ${pct(d.rules.min_prob)}+</b></span></div>
+      <div class="row"><span>Last check (${esc(last.date)})</span><span class="muted">${esc(last.note)}</span></div>
+      <div class="scroll"><table><thead><tr><th>Model favorites at</th><th class="r">Matches</th><th class="r">Predicted</th><th class="r">Actually won</th><th class="r">Gap</th></tr></thead><tbody>
+        ${last.table.filter(r => r.n).map(r => `<tr><td>${pct(r.min_prob)}+</td><td class="r num">${r.n}</td><td class="r num">${pct(r.predicted, 1)}</td>
+          <td class="r num">${pct(r.actual, 1)}</td><td class="r num ${cls(r.actual - r.predicted)}">${sgn((r.actual - r.predicted) * 100, 1)} pts</td></tr>`).join("")}
+      </tbody></table></div>
+      ${L.history.length > 1 ? `<div class="muted" style="font-size:12px">${L.history.slice(1).map(h => `${esc(h.date)}: ${esc(h.note)}`).join("<br>")}</div>` : ""}
+    </div>` : `<div class="empty">The first daily check runs today; it compares the model's predictions with real results.</div>`}</section>`;
+  $("#app").innerHTML = `${head}<main>${kpis}${chart}${statsCard}${learnCard}
     <section class="card"><h3>Picks sent <span>${s.total} total</span></h3>${picks}</section>
     <section class="card"><h3>Next 3 hours <span>${d.upcoming_passing || 0} passing the rules right now</span></h3>${up}</section>
     <div class="foot">Picks are graded at the minimum price in each Telegram message, 1 unit each; a better Hard Rock price only improves this.

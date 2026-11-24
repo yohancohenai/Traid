@@ -245,21 +245,34 @@ def predict_upcoming(db: Session, is_demo: bool, horizon_hours: int = 48) -> dic
     p = champ.predict(up)
     comps = {c: models[c].predict(up) for c in COMPONENTS if c in models}
     scale = get_filters(db, is_demo)["uncertainty_scale"]
-    n = 0
+    n = refreshed = 0
+    ids = [int(x) for x in up["match_id"]]
+    # Latest prediction per match from this model: if the new numbers are the same, refresh its as_of instead of
+    # appending a duplicate row (the bot predicts every ~10 minutes; duplicates would grow the database fast).
+    latest = {}
+    for pr in db.scalars(select(Prediction).where(Prediction.match_id.in_(ids), Prediction.is_backtest.is_(False),
+                                                  Prediction.model_version_id == mv.id).order_by(Prediction.as_of)):
+        latest[pr.match_id] = pr
     for i, (_, r) in enumerate(up.iterrows()):
         cp = {c: float(v[i]) for c, v in comps.items()}
         pi = float(np.clip(p[i], 0.01, 0.99))
         lo, hi = uncertainty_interval(pi, float(r["bayes_sd"]), list(cp.values()), scale)
+        dq = data_quality(int(r["_n1"]), int(r["_n2"]), float(r["pts_coverage"]))
+        prev = latest.get(int(r["match_id"]))
+        if prev and abs(prev.p1_win - pi) < 0.002 and abs(prev.p1_ci_low - lo) < 0.002 \
+                and abs(prev.p1_ci_high - hi) < 0.002 and prev.data_quality == dq:
+            prev.as_of = now
+            refreshed += 1
+            continue
         fm = full_match_model(pi, with_points=False)
         feats = {k: (None if (isinstance(v, float) and math.isnan(v)) else (float(v) if isinstance(v, (int, float, np.floating, np.integer)) else str(v)))
                  for k, v in r.items() if k not in ("scheduled_at",)}
         db.add(Prediction(match_id=int(r["match_id"]), model_version_id=mv.id, as_of=now, p1_win=pi, p1_ci_low=lo,
                           p1_ci_high=hi, p_set=fm["p_game"], scorelines=fm["scorelines"], component_probs=cp,
-                          features=feats, data_quality=data_quality(int(r["_n1"]), int(r["_n2"]), float(r["pts_coverage"])),
-                          is_demo=is_demo))
+                          features=feats, data_quality=dq, is_demo=is_demo))
         n += 1
     db.flush()
-    return {"status": "OK", "predicted": n, "model": mv.name, "version": mv.version}
+    return {"status": "OK", "predicted": n, "unchanged": refreshed, "model": mv.name, "version": mv.version}
 
 
 def latest_prediction(db: Session, match_id: int, backtest: bool = False) -> Prediction | None:

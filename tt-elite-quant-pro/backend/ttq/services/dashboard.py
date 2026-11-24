@@ -166,7 +166,11 @@ def build_data(db: Session, now: datetime | None = None) -> dict:
     cfg = get_setting(db, "alerts")
     test = (champ.metrics or {}).get("test", {}) if champ else {}
     upcoming = _upcoming(db, now, tz)
+    lrow = db.get(AppSetting, "learning_log")
+    entries = (lrow.value.get("entries") if lrow else None) or []
     return {
+        "learning": {"last": entries[-1] if entries else None,
+                     "history": [{k: e[k] for k in ("date", "matches", "threshold_after", "note")} for e in entries[-10:]][::-1]},
         "stats": _stats(picks),
         "model_test": {"accuracy": test.get("accuracy"), "log_loss": test.get("log_loss"), "n": test.get("n")},
         "upcoming_passing": sum(u["status"] == "passes rules" for u in upcoming),

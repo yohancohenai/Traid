@@ -45,7 +45,7 @@ DEFAULTS: dict[str, dict] = {
         "price_targets": True, "price_targets_max": 8, "price_targets_window_minutes": 75,
     },
     "display": {"timezone": "America/New_York", "data_mode": "ALL"},
-    "monitoring": {"drift_window": 300, "drift_logloss_tolerance": 0.02, "retrain_min_new_matches": 500,
+    "monitoring": {"drift_window": 300, "drift_logloss_tolerance": 0.02, "retrain_min_new_matches": 300,
                    "promotion_min_logloss_gain": 0.002},
 }
 
