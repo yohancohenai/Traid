@@ -16,7 +16,7 @@ from ttq.services.app_settings import get_setting, set_setting
 log = logging.getLogger(__name__)
 
 
-def cloud_cycle(window_minutes: int = 35, min_minutes: int = 10, hold_minutes: float = 0, max_interval: float = 0.16, sleep=time.sleep,
+def cloud_cycle(window_minutes: int = 35, min_minutes: int = 10, hold_minutes: float = 0, max_interval: float = 0.20, min_prob: float = 0.60, sleep=time.sleep,
                 clock=time.monotonic) -> dict:
     """window_minutes is the lead time: a pick is released when its match is at most this far away, so picks arrive
     one at a time, each about `window_minutes` before its start. With hold_minutes > 0 the run stays alive and checks
@@ -31,10 +31,11 @@ def cloud_cycle(window_minutes: int = 35, min_minutes: int = 10, hold_minutes: f
 
     def window(db):
         cfg = get_setting(db, "alerts")
-        want = {"picks_min_minutes": min_minutes, "picks_max_minutes": window_minutes, "picks_max_interval": max_interval}
+        want = {"picks_min_minutes": min_minutes, "picks_max_minutes": window_minutes, "picks_max_interval": max_interval,
+                "picks_min_prob": min_prob}
         if any(cfg.get(k) != v for k, v in want.items()):
             set_setting(db, "alerts", want)
-        return {"window": [min_minutes, window_minutes], "max_interval": max_interval}
+        return {"window": [min_minutes, window_minutes], "max_interval": max_interval, "min_prob": min_prob}
     out["window"] = jobs.run_job("cloud_window", window)
 
     def picks(db):

@@ -122,7 +122,11 @@ def build_picks(db: Session, now: datetime | None = None, stats: dict | None = N
     now = now or utcnow()
     F = get_filters(db, False)
     lo_min, hi_min = int(cfg.get("picks_min_minutes", 10)), int(cfg.get("picks_max_minutes", 45))
-    max_width = float(cfg.get("picks_max_interval", 0.16))
+    max_width = float(cfg.get("picks_max_interval", 0.20))
+    # Back-test (Nov 2026, 1,338 out-of-sample matches): the model is well calibrated for favourites at 60%+ but
+    # over-confident on near coin-flips, and the HIGH-quality / narrow-range / models-agree filters did not raise the
+    # hit rate. So picks are favourites at >= picks_min_prob; only LOW-quality data is excluded.
+    min_prob = float(cfg.get("picks_min_prob", 0.60))
     tz = ZoneInfo(get_setting(db, "display").get("timezone") or get_settings().user_timezone)
     sent_row = db.get(AppSetting, "picks_sent")
     sent = {k: v for k, v in (sent_row.value if sent_row else {}).items()
@@ -150,12 +154,14 @@ def build_picks(db: Session, now: datetime | None = None, stats: dict | None = N
         if not pred:
             skip("no_prediction")
             continue
-        if pred.data_quality != "HIGH":
-            skip("not_high_quality")
+        if pred.data_quality == "LOW":
+            skip("low_quality")
+            continue
+        if max(pred.p1_win, 1 - pred.p1_win) < min_prob:
+            skip("below_min_prob")
             continue
         width = pred.p1_ci_high - pred.p1_ci_low
         f = pred.features or {}
-        comps = list((pred.component_probs or {}).values()) or [pred.p1_win]
         if width > max_width:
             skip("too_uncertain")
             st.setdefault("widths", []).append(round(width, 3))
@@ -163,11 +169,9 @@ def build_picks(db: Session, now: datetime | None = None, stats: dict | None = N
         if min(f.get("_n1") or 0, f.get("_n2") or 0) < F["min_player_matches"]:
             skip("too_few_player_matches")
             continue
-        if max(comps) - min(comps) > F["max_model_disagreement"]:
-            skip("models_disagree")
-            continue
         best = None
-        for side, p, lo in (("p1", pred.p1_win, pred.p1_ci_low), ("p2", 1 - pred.p1_win, 1 - pred.p1_ci_high)):
+        fav = ("p1", pred.p1_win, pred.p1_ci_low) if pred.p1_win >= 0.5 else ("p2", 1 - pred.p1_win, 1 - pred.p1_ci_high)
+        for side, p, lo in (fav,):
             t = side_target(p, lo, F)
             if t is None:
                 continue

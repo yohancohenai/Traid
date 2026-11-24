@@ -25,7 +25,8 @@ def test_only_strong_matches_in_window(f, db):
     good = _m(f, db, 30)
     _m(f, db, 5)                     # too soon
     _m(f, db, 90)                    # too far
-    _m(f, db, 30, dq="MEDIUM")       # not HIGH quality
+    _m(f, db, 30, dq="LOW")          # low-quality data
+    _m(f, db, 30, p1=0.55)           # under 60%: model over-confident on close matches
     _m(f, db, 30, width=0.30)        # too uncertain
     _m(f, db, 30, demo=True)         # demo never sent
     picks = build_picks(db)
@@ -111,9 +112,10 @@ def test_status_reports_missing_pieces(db):
 def test_rejection_reasons_are_counted(f, db):
     _setup(db)
     _m(f, db, 30)                    # passes
-    _m(f, db, 30, dq="MEDIUM")
+    _m(f, db, 30, dq="LOW")
     _m(f, db, 30, width=0.30)
+    _m(f, db, 30, p1=0.45)           # favourite is p2 at 55%: under the minimum
     st = {}
     picks = build_picks(db, stats=st)
     assert len(picks) == 1
-    assert st["in_window"] == 3 and st["not_high_quality"] == 1 and st["too_uncertain"] == 1
+    assert st["in_window"] == 4 and st["low_quality"] == 1 and st["too_uncertain"] == 1 and st["below_min_prob"] == 1

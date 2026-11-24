@@ -38,7 +38,8 @@ def _fmt(dt, tz) -> str:
 def _upcoming(db: Session, now, tz, hours: int = 3) -> list[dict]:
     F = get_filters(db, False)
     cfg = get_setting(db, "alerts")
-    max_w = float(cfg.get("picks_max_interval", 0.16))
+    max_w = float(cfg.get("picks_max_interval", 0.20))
+    min_prob = float(cfg.get("picks_min_prob", 0.60))
     ms = db.scalars(select(Match).where(Match.is_demo.is_(False), Match.status == "SCHEDULED",
                                         Match.scheduled_at >= now, Match.scheduled_at <= now + timedelta(hours=hours))
                     .order_by(Match.scheduled_at)).all()
@@ -56,14 +57,14 @@ def _upcoming(db: Session, now, tz, hours: int = 3) -> list[dict]:
         f = pred.features or {}
         comps = list((pred.component_probs or {}).values()) or [p1]
         reasons = []
-        if pred.data_quality != "HIGH":
-            reasons.append("data quality")
+        if pred.data_quality == "LOW":
+            reasons.append("low data quality")
+        if p < min_prob:
+            reasons.append(f"under {min_prob:.0%}")
         if width > max_w:
             reasons.append("too uncertain")
         if min(f.get("_n1") or 0, f.get("_n2") or 0) < F["min_player_matches"]:
             reasons.append("too few matches")
-        if max(comps) - min(comps) > F["max_model_disagreement"]:
-            reasons.append("models disagree")
         t = side_target(p, lo, F)
         out.append({**row, "p1_prob": round(p1, 3), "lean": m.player1.canonical_name if fav_p1 else m.player2.canonical_name,
                     "lean_prob": round(p, 3), "min_price": round_up_american(t) if t else None,
@@ -173,7 +174,7 @@ def build_data(db: Session, now: datetime | None = None) -> dict:
         "model": f"{champ.name}_{champ.version}" if champ else None,
         "trained": champ.trained_at.strftime("%Y-%m-%d") if champ and champ.trained_at else None,
         "matches_in_history": n_done,
-        "rules": {"min_ev": get_filters(db, False)["min_ev"], "max_uncertainty": cfg.get("picks_max_interval"),
+        "rules": {"min_prob": cfg.get("picks_min_prob"), "min_ev": get_filters(db, False)["min_ev"], "max_uncertainty": cfg.get("picks_max_interval"),
                   "lead_minutes": cfg.get("picks_max_minutes")},
         "record": rec, "picks": [{k: v for k, v in p.items() if k != "_at"} for p in picks[:200]],
         "upcoming": upcoming,
