@@ -9,18 +9,32 @@ from ttq.services import jobs
 def main():
     setup_logging()
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["status", "picks-preview", "test-alert", "price-targets", "backfill-ttseries", "seed-demo", "ingest", "predict", "settle", "monitor", "retrain", "train-force", "hash-password", "cloud-run"])
+    ap.add_argument("cmd", choices=["status", "picks-preview", "test-alert", "price-targets", "backfill-ttseries", "seed-demo", "ingest", "predict", "settle", "monitor", "retrain", "train-force", "hash-password", "cloud-run", "dashboard"])
     ap.add_argument("--fast", action="store_true")
     ap.add_argument("--live", action="store_true", help="operate on live (non-demo) data where applicable")
     ap.add_argument("--password")
     ap.add_argument("--from-id", type=int, default=1)
     ap.add_argument("--to-id", type=int)
     ap.add_argument("--window", type=int, default=35, help="cloud-run: release each pick when its match is this many minutes away")
+    ap.add_argument("--out", default="site", help="dashboard: output folder")
     ap.add_argument("--hold", type=float, default=0, help="cloud-run: keep releasing picks every minute for this many minutes")
     a = ap.parse_args()
     if a.cmd == "hash-password":
         import bcrypt
         print(bcrypt.hashpw(a.password.encode(), bcrypt.gensalt()).decode()); return
+    if a.cmd == "dashboard":
+        import os
+        from ttq.core.db import SessionLocal
+        from ttq.services.dashboard import write_site
+        pw = os.environ.get("TTQ_DASH_PASSWORD")
+        if not pw:
+            print("TTQ_DASH_PASSWORD not set; dashboard skipped."); return
+        db = SessionLocal()
+        try:
+            print(json.dumps(write_site(db, a.out, pw)))
+        finally:
+            db.rollback(); db.close()
+        return
     if a.cmd == "cloud-run":
         from ttq.services.cloud import cloud_cycle
         print(json.dumps(cloud_cycle(a.window, hold_minutes=a.hold), indent=2, default=str)[:20000]); return

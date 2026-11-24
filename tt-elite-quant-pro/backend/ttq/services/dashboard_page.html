@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>TT Elite Picks</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --ink: #14171c; --muted: #5d6673; --line: #e3e6eb;
+  --pos: #137a3f; --neg: #b42318; --accent: #4b3fd1; --chip: #eef0f4;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1115; --card: #171a20; --ink: #e9ecf1; --muted: #98a1ad; --line: #272b33;
+          --pos: #3ccf7f; --neg: #ff6b5e; --accent: #8f86ff; --chip: #22262e; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+       font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 900px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 20px; margin: 4px 0 2px; }
+h2 { font-size: 15px; margin: 22px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.sub { color: var(--muted); font-size: 13px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 14px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.tile .k { color: var(--muted); font-size: 12px; }
+.tile .v { font-size: 22px; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.list { display: grid; gap: 8px; }
+.row { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.row .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.row .match { font-weight: 600; }
+.row .meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.chip { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--chip); font-size: 12px;
+        font-weight: 600; white-space: nowrap; }
+.won { color: var(--pos); } .lost { color: var(--neg); } .pass { color: var(--accent); }
+.empty { color: var(--muted); padding: 10px 2px; }
+form { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; max-width: 360px;
+       margin: 12vh auto 0; }
+input { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg);
+        color: var(--ink); font-size: 16px; margin: 10px 0; }
+button { width: 100%; padding: 10px; border: 0; border-radius: 8px; background: var(--accent); color: #fff;
+         font-size: 15px; font-weight: 600; }
+.err { color: var(--neg); font-size: 13px; min-height: 18px; }
+.foot { color: var(--muted); font-size: 12px; margin: 24px 0 8px; }
+a.link { color: var(--accent); font-size: 13px; cursor: pointer; }
+</style>
+</head>
+<body>
+<main id="app">
+  <form id="login">
+    <h1>TT Elite Picks</h1>
+    <div class="sub">Private dashboard. Enter your password.</div>
+    <input id="pw" type="password" autocomplete="current-password" placeholder="Password" autofocus>
+    <button type="submit">Open</button>
+    <div class="err" id="err"></div>
+  </form>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const am = v => v == null ? "–" : (v > 0 ? "+" + v : String(v));
+const pct = v => v == null ? "–" : (v * 100).toFixed(0) + "%";
+
+async function decrypt(blob, pw) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey({name: "PBKDF2", salt: b64(blob.salt), iterations: blob.iter, hash: "SHA-256"},
+                                            base, {name: "AES-GCM", length: 256}, false, ["decrypt"]);
+  const pt = await crypto.subtle.decrypt({name: "AES-GCM", iv: b64(blob.iv)}, key, b64(blob.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+function render(d) {
+  const r = d.record, n = r.w + r.l, bn = r.bw + r.bl;
+  const tiles = [
+    ["Picks record", n ? `${r.w}-${r.l}` : "–"],
+    ["Units (at minimum)", n ? (r.units > 0 ? "+" : "") + r.units.toFixed(2) : "–"],
+    ["Your bets", bn ? `${r.bw}-${r.bl} · ${(r.bunits > 0 ? "+" : "") + r.bunits.toFixed(2)}u` : "–"],
+    ["Hard Rock ≥ minimum", r.logged ? `${r.beat} of ${r.logged}` : "–"],
+  ];
+  const pickRows = d.picks.length ? d.picks.map(p => `
+    <div class="row"><div class="top"><span class="match">${esc(p.pick)} <span class="sub">(${pct(p.prob)})</span></span>
+      <span class="chip ${p.result === "won" ? "won" : p.result === "lost" ? "lost" : ""}">${esc(p.result)}${p.units != null ? " " + (p.units > 0 ? "+" : "") + p.units.toFixed(2) + "u" : ""}</span></div>
+      <div class="meta">${esc(p.match)} · ${esc(p.match_time)}${p.score ? " · " + esc(p.score) : ""}</div>
+      <div class="meta">Minimum ${am(p.min)}${p.hr_action ? " · Hard Rock: " + (p.hr_action === "skip" ? "skipped" : am(p.hr_price) + (p.hr_action === "bet" ? " (bet)" : "")) : ""}</div></div>`).join("")
+    : `<div class="empty">No picks sent yet.</div>`;
+  const upRows = d.upcoming.length ? d.upcoming.map(u => `
+    <div class="row"><div class="top"><span class="match">${esc(u.p1)} vs ${esc(u.p2)}</span>
+      <span class="chip ${u.status === "passes rules" ? "pass" : ""}">${esc(u.status)}</span></div>
+      <div class="meta">${esc(u.time)}${u.lean ? ` · Model leans ${esc(u.lean)} ${pct(u.lean_prob)}` : ""}${u.min_price != null ? ` · worth it at ${am(u.min_price)} or better` : ""}</div></div>`).join("")
+    : `<div class="empty">No matches in the next 3 hours.</div>`;
+  $("#app").innerHTML = `
+    <h1>TT Elite Picks</h1>
+    <div class="sub">Updated ${esc(d.updated)} ET · model ${esc(d.model || "–")} (${esc(d.trained || "–")}) · ${d.matches_in_history.toLocaleString()} matches in history</div>
+    <div class="tiles">${tiles.map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join("")}</div>
+    <h2>Picks sent</h2><div class="list">${pickRows}</div>
+    <h2>Next 3 hours</h2><div class="list">${upRows}</div>
+    <div class="foot">Picks are graded at the minimum price in each message, 1 unit each. "Your bets" uses the prices you
+      replied with in Telegram. Model estimates, not guarantees. Refreshes about every 10 minutes.
+      <br><a class="link" id="out">Sign out on this device</a></div>`;
+  $("#out").onclick = () => { try { localStorage.removeItem("ttq_pw"); } catch (e) {} location.reload(); };
+}
+
+async function open(pw, remember) {
+  const res = await fetch("data.json?t=" + Date.now(), {cache: "no-store"});
+  const blob = await res.json();
+  const data = await decrypt(blob, pw);
+  if (remember) { try { localStorage.setItem("ttq_pw", pw); } catch (e) {} }
+  render(data);
+}
+
+$("#login").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("#err").textContent = "";
+  try { await open($("#pw").value, true); } catch (err) { $("#err").textContent = "Wrong password, or the page is still updating. Try again."; }
+});
+
+(async () => {
+  let saved = null;
+  try { saved = localStorage.getItem("ttq_pw"); } catch (e) {}
+  if (saved) { try { await open(saved, false); } catch (e) { try { localStorage.removeItem("ttq_pw"); } catch (_) {} } }
+})();
+</script>
+</body>
+</html>

@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false    # never run two at once; a long first run just delays the next
 
 permissions:
-  contents: read
+  contents: write              # publishes the encrypted dashboard to the gh-pages branch
   actions: write               # lets each run start the next one (see last step)
 
 jobs:
@@ -41,6 +41,7 @@ jobs:
       TTQ_TELEGRAM_BOT_TOKEN: ${{ secrets.TTQ_TELEGRAM_BOT_TOKEN }}
       TTQ_TELEGRAM_CHAT_ID: ${{ secrets.TTQ_TELEGRAM_CHAT_ID }}
       TTQ_JWT_SECRET: not-used-in-bot-mode
+      TTQ_DASH_PASSWORD: ${{ secrets.TTQ_DASH_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -80,6 +81,19 @@ jobs:
         run: |
           alembic upgrade head
           python -m ttq.cli cloud-run --window 35 --hold 8 | tail -c 6000
+
+      # Private dashboard: data is encrypted with TTQ_DASH_PASSWORD before it is published (the repo is public).
+      - name: Publish dashboard
+        if: always() && env.TTQ_DASH_PASSWORD != ''
+        working-directory: tt-elite-quant-pro/backend
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m ttq.cli dashboard --out "$GITHUB_WORKSPACE/site"
+          cd "$GITHUB_WORKSPACE/site"
+          git init -q && git checkout -q -b gh-pages && git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898309+github-actions[bot]@users.noreply.github.com" commit -qm "dashboard update"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" gh-pages
 
       - name: Save database
         if: always()
