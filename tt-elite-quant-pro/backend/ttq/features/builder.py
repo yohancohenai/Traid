@@ -37,6 +37,7 @@ class MatchRecord:
     set_points: list[tuple[int, int]] = field(default_factory=list)
     tournament_level: str = "standard"
     is_demo: bool = False
+    venue: str = ""           # hall, e.g. OSP / HSC2 / POCZESNA (from the official tournament name)
 
     @property
     def counts_for_rating(self) -> bool:
@@ -48,13 +49,20 @@ class MatchRecord:
         return self.finished_at or (self.scheduled_at + timedelta(minutes=ASSUMED_MATCH_MINUTES))
 
 
+def tod_band(t: datetime) -> int:
+    """Time of day in Poland (UTC+1 approx.): 0 night 22-06, 1 morning 06-12, 2 afternoon 12-17, 3 evening 17-22."""
+    h = (t.hour + 1) % 24
+    return 0 if (h >= 22 or h < 6) else 1 if h < 12 else 2 if h < 17 else 3
+
+
 def shrunk_rate(wins: float, n: float, k: float = 10.0) -> float:
     return (wins + k / 2) / (n + k)
 
 
 class PlayerHistory:
     __slots__ = ("results", "resid", "opp", "set_w", "set_n", "pts_w", "pts_n", "pts_matches",
-                 "match_times", "n", "wins", "vs_stronger_w", "vs_stronger_n", "deciders", "set_diff")
+                 "match_times", "n", "wins", "vs_stronger_w", "vs_stronger_n", "deciders", "set_diff",
+                 "timed_resid", "venue_resid", "tod_resid", "all_resid")
 
     def __init__(self):
         self.results: deque = deque(maxlen=50)      # 1/0
@@ -69,6 +77,11 @@ class PlayerHistory:
         self.vs_stronger_w = self.vs_stronger_n = 0.0
         self.deciders = 0
         self.set_diff = 0.0
+        # situational: (time, result - rating expectation); per-venue and per-time-of-day [sum, n]
+        self.timed_resid: deque = deque(maxlen=60)
+        self.venue_resid: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])
+        self.tod_resid: dict[int, list[float]] = defaultdict(lambda: [0.0, 0.0])
+        self.all_resid = [0.0, 0.0]
 
 
 FEATURES_RATING = ["elo_p", "dyn_elo_p", "glicko_p", "bayes_p", "set_elo_p", "bt_p",
@@ -77,7 +90,10 @@ FEATURES_FORM = ["wr_diff", "l5_diff", "l10_diff", "l20_diff", "l50_diff", "adj_
                  "h2h_share", "h2h_n", "h2h_days", "set_pct_diff", "set_diff_avg_diff", "pts_share_diff",
                  "common_opp_diff", "vs_stronger_diff", "sameday_diff", "rest_h_diff", "load3d_diff",
                  "inactive_d_diff", "stability_diff", "decider_rate_diff", "min_n", "n_diff_log",
-                 "pts_coverage", "level_major"]
+                 "pts_coverage", "level_major", "mom24_diff", "tod_diff"]
+# Computed but not used by the models: in a Nov 2026 rolling test (3 folds, 5.4k matches) venue_diff made predictions
+# worse and session_diff did nothing. They stay available for re-testing once more history exists.
+FEATURES_EXPERIMENTAL = ["session_diff", "venue_diff"]
 ALL_FEATURES = FEATURES_RATING + FEATURES_FORM
 
 
@@ -159,6 +175,21 @@ class FeatureBuilder:
         f["n_diff_log"] = math.log1p(ha.n) - math.log1p(hb.n)
         f["pts_coverage"] = min(ha.pts_matches / ha.n if ha.n else 0, hb.pts_matches / hb.n if hb.n else 0)
         f["level_major"] = 1.0 if m.tournament_level in ("major", "final", "playoff") else 0.0
+        # situational: performance vs rating expectation, shrunk towards 0 (k = pseudo-matches)
+        def recent(h, hours, k):
+            xs = [r for (x, r) in h.timed_resid if 0 <= (t - x).total_seconds() < hours * 3600]
+            return sum(xs) / (len(xs) + k)
+
+        def split(h, table, key, k=15):
+            s_, n_ = table[key]
+            base = h.all_resid[0] / (h.all_resid[1] + k)
+            return s_ / (n_ + k) - base                  # how much better/worse than usual in this setting
+
+        tod = tod_band(t)
+        f["session_diff"] = recent(ha, 6, 3) - recent(hb, 6, 3)
+        f["mom24_diff"] = recent(ha, 24, 5) - recent(hb, 24, 5)
+        f["venue_diff"] = (split(ha, ha.venue_resid, m.venue) - split(hb, hb.venue_resid, m.venue)) if m.venue else 0.0
+        f["tod_diff"] = split(ha, ha.tod_resid, tod) - split(hb, hb.tod_resid, tod)
         f["_n1"], f["_n2"] = ha.n, hb.n
         return f
 
@@ -191,6 +222,16 @@ class FeatureBuilder:
                     h.pts_w += sum(y for _, y in m.set_points); h.pts_n += sum(x + y for x, y in m.set_points)
                 h.pts_matches += 1
             h.match_times.append(m.scheduled_at)
+            res = r - exp
+            h.timed_resid.append((m.scheduled_at, res))
+            h.all_resid[0] += res
+            h.all_resid[1] += 1
+            if m.venue:
+                h.venue_resid[m.venue][0] += res
+                h.venue_resid[m.venue][1] += 1
+            band = tod_band(m.scheduled_at)
+            h.tod_resid[band][0] += res
+            h.tod_resid[band][1] += 1
             h.n += 1
             h.wins += int(r)
             if stronger:

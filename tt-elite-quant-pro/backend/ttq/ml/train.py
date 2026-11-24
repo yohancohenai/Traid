@@ -34,6 +34,7 @@ FEATURE_GROUPS = {
     "opponents": ["common_opp_diff", "vs_stronger_diff"],
     "workload": ["sameday_diff", "rest_h_diff", "load3d_diff", "inactive_d_diff"],
     "context": ["level_major"],
+    "situational": ["mom24_diff", "tod_diff"],
 }
 PROB_FEATURES = {"elo_p", "dyn_elo_p", "glicko_p", "bayes_p", "set_elo_p", "bt_p", "h2h_share"}
 

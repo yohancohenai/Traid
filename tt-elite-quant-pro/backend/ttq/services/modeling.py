@@ -27,6 +27,12 @@ MIN_TRAIN_MATCHES = 1500
 COMPONENTS = ["elo_baseline", "glicko2_baseline", "bayes_hier", "logreg", "lightgbm", "catboost"]
 
 
+def _venue(name: str) -> str:
+    """'TT Elite Series OSP2 2026-11-22 05:00' -> 'OSP2' (the hall)."""
+    parts = (name or "").replace("TT Elite Series", "").split()
+    return parts[0].upper() if parts else ""
+
+
 def load_records(db: Session, is_demo: bool, until: datetime | None = None) -> list[MatchRecord]:
     q = select(Match).options(selectinload(Match.sets), selectinload(Match.tournament)).where(Match.is_demo == is_demo)
     if until is not None:
@@ -41,7 +47,8 @@ def load_records(db: Session, is_demo: bool, until: datetime | None = None) -> l
             finished_at=as_utc(m.finished_at), status=m.status if won is not None or m.status != "FINISHED" else "UNVERIFIED",
             p1_won=won, sets_p1=m.sets_p1, sets_p2=m.sets_p2,
             set_points=[(s.p1_points, s.p2_points) for s in m.sets if s.p1_points is not None],
-            tournament_level=m.tournament.level if m.tournament else "standard", is_demo=m.is_demo))
+            tournament_level=m.tournament.level if m.tournament else "standard", is_demo=m.is_demo,
+            venue=_venue(m.tournament.name if m.tournament else "")))
     return out
 
 
