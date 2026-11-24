@@ -59,3 +59,22 @@ def test_poll_only_owner_chat_and_advances_offset(f, db, monkeypatch):
     r = poll_replies(db)
     assert r["logged"] == 1 and len(sent) == 1 and "+115" in sent[0]
     assert db.get(price_log.AppSetting, "tg_update_offset").value["offset"] == 9
+
+
+def test_screenshot_price_for_picked_player(monkeypatch):
+    from ttq.ocr import hardrock
+    rows = [hardrock.Row([("TT", 90, 0), ("Elite", 90, 30), ("Series", 90, 60)]),
+            hardrock.Row([("Rafal,", 90, 0), ("Stapor", 90, 60), ("-120", 90, 700)]),
+            hardrock.Row([("Kamil", 90, 0), ("Rudomina", 90, 60), ("+105", 90, 700)])]
+    monkeypatch.setattr(hardrock, "ocr_rows", lambda img: (rows, ""))
+    assert price_log.price_from_screenshot(b"x", "Kamil Rudomina") == 105
+    assert price_log.price_from_screenshot(b"x", "Rafal Stapor") == -120
+    assert price_log.price_from_screenshot(b"x", "Someone Else") is None
+
+
+def test_photo_reply_logs_bet_with_caption(f, db, monkeypatch):
+    m = _pick(f, db)
+    monkeypatch.setattr(price_log, "_download_photo", lambda msg: b"img")
+    monkeypatch.setattr(price_log, "price_from_screenshot", lambda img, name: 125)
+    out = price_log._photo_reply(db, {"photo": [{"file_id": "a"}], "caption": "bet"}, 500 + m.id)
+    assert out.startswith("From your screenshot: Bet logged: Kamil Rudomina at +125")

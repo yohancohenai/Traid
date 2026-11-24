@@ -23,7 +23,8 @@ from ttq.odds.math import decimal_to_american
 log = logging.getLogger(__name__)
 
 HELP = ("To log a Hard Rock price, reply to the pick message with:\n"
-        "+110  (price you see)\nbet +110  (you placed it)\nskip  (not offered / skipped)")
+        "+110  (price you see)\nbet +110  (you placed it)\nskip  (not offered / skipped)\n"
+        "or a screenshot of the Hard Rock match (add the caption 'bet' if you placed it)")
 
 _SKIP = {"skip", "no", "gone", "pass", "not offered", "none", "n/a"}
 _BET = re.compile(r"^(bet|took|placed|in)\b", re.I)
@@ -104,6 +105,46 @@ def apply_reply(db: Session, reply_to_id: int, text: str, now=None) -> str:
     return f"{what}: {name} at {am:+d} (minimum {mn:+d}), {verdict}"
 
 
+def price_from_screenshot(image: bytes, pick_name: str) -> int | None:
+    """Read a Hard Rock screenshot and return the moneyline shown next to the picked player, or None."""
+    from ttq.ocr.hardrock import name_score, ocr_rows, parse_rows
+    rows, _ = ocr_rows(image)
+    best = None
+    for line in parse_rows(rows):
+        if line.american is None:
+            continue
+        sc = name_score(line.name.replace(",", " "), pick_name)
+        if sc >= 0.7 and (best is None or sc > best[0]):
+            best = (sc, line.american)
+    return best[1] if best else None
+
+
+def _download_photo(msg: dict) -> bytes:
+    s = get_settings()
+    file_id = msg["photo"][-1]["file_id"]                  # largest size
+    path = _tg("getFile", file_id=file_id)["file_path"]
+    r = httpx.get(f"https://api.telegram.org/file/bot{s.telegram_bot_token}/{path}", timeout=30)
+    r.raise_for_status()
+    return r.content
+
+
+def _photo_reply(db: Session, msg: dict, reply_to_id: int) -> str:
+    row = _row(db, "picks_log")
+    pk = next((v for v in (row.value if row else {}).values() if v.get("tg_msg") == reply_to_id), None)
+    if not pk:
+        return "That message isn't one of my picks, so I couldn't log it.\n" + HELP
+    try:
+        am = price_from_screenshot(_download_photo(msg), pk.get("pick_name") or "")
+    except Exception as e:  # noqa
+        log.warning("screenshot read failed: %s", e.__class__.__name__)
+        am = None
+    if am is None:
+        return (f"I couldn't find {pk.get('pick_name') or 'the picked player'}'s price in that screenshot. "
+                "Please type it instead, e.g. +110 or bet +110.")
+    caption = (msg.get("caption") or "").strip()
+    return "From your screenshot: " + apply_reply(db, reply_to_id, ("bet " if _BET.match(caption) else "") + f"{am:+d}")
+
+
 def poll_replies(db: Session) -> dict:
     """Read new Telegram messages, log replies to picks, confirm each one. Safe to call every minute."""
     s = get_settings()
@@ -124,7 +165,10 @@ def poll_replies(db: Session) -> dict:
             continue                                        # only the owner's chat counts
         text = msg.get("text") or ""
         rt = (msg.get("reply_to_message") or {}).get("message_id")
-        if rt:
+        if rt and msg.get("photo"):
+            answer = _photo_reply(db, msg, rt)
+            logged += "logged" in answer.lower() and "couldn" not in answer.lower()
+        elif rt:
             answer = apply_reply(db, rt, text)
             logged += answer.startswith(("Logged", "Bet logged", "Price logged"))
         elif parse_reply(text) or text.strip().lower() in ("help", "/help", "/start"):
