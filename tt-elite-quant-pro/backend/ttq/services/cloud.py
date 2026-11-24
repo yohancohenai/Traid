@@ -49,4 +49,9 @@ def cloud_cycle(window_minutes: int = 120, min_minutes: int = 10) -> dict:
     out["settle"] = jobs.run_job("settle", jobs.settle_job)
 
     out["picks"] = jobs.run_job("picks", picks)
+
+    def weekly(db):
+        from ttq.services.summary import weekly_summary_job
+        return weekly_summary_job(db)
+    out["weekly_summary"] = jobs.run_job("weekly_summary", weekly)
     return out

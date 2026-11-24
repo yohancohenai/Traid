@@ -177,10 +177,14 @@ def build_picks(db: Session, now: datetime | None = None) -> list[dict]:
 def picks_job(db: Session) -> dict:
     from ttq.services.alerts import raise_alert
     from ttq.services.messages import conditional_pick_text
-    out = []
+    from ttq.services.summary import log_picks
+    out, logged = [], []
     for pk in build_picks(db):
         m = pk["match"]
         title, body = conditional_pick_text(db, m, pk["pred"], pk["side"], pk["p"], pk["min_american"])
         a = raise_alert(db, "pick", title, body, f"pick:{m.id}", "INFO", False, rate_limited=False)
         out.append({"match_id": m.id, "side": pk["side"], "min": pk["min_american"], "channels": a.channels_sent if a else []})
+        logged.append({"match_id": m.id, "side": pk["side"], "p": round(pk["p"], 4), "min_american": pk["min_american"]})
+    if logged:
+        log_picks(db, logged)
     return {"sent": len(out), "picks": out}
