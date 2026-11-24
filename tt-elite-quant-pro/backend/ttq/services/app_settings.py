@@ -41,7 +41,7 @@ DEFAULTS: dict[str, dict] = {
         "stale_provider_minutes": 30,
         "units_per_bet": 1.0,
         "conditional_picks": True, "picks_max_per_day": 0,  # 0 = no daily cap
-        "picks_max_interval": 0.135, "picks_min_minutes": 10, "picks_max_minutes": 45,
+        "picks_max_interval": 0.16, "picks_min_minutes": 10, "picks_max_minutes": 45,
         "price_targets": True, "price_targets_max": 8, "price_targets_window_minutes": 75,
     },
     "display": {"timezone": "America/New_York", "data_mode": "ALL"},

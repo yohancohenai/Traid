@@ -122,7 +122,7 @@ def build_picks(db: Session, now: datetime | None = None, stats: dict | None = N
     now = now or utcnow()
     F = get_filters(db, False)
     lo_min, hi_min = int(cfg.get("picks_min_minutes", 10)), int(cfg.get("picks_max_minutes", 45))
-    max_width = float(cfg.get("picks_max_interval", 0.135))
+    max_width = float(cfg.get("picks_max_interval", 0.16))
     tz = ZoneInfo(get_setting(db, "display").get("timezone") or get_settings().user_timezone)
     sent_row = db.get(AppSetting, "picks_sent")
     sent = {k: v for k, v in (sent_row.value if sent_row else {}).items()
