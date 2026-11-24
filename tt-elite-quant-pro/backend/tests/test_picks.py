@@ -106,3 +106,14 @@ def test_status_reports_missing_pieces(db):
     names = {k for k, _ in r["checks"]}
     assert {"match history", "trained model", "Telegram configured", "scheduler (worker)"} <= names
     assert r["ready"] is False      # empty test database: nothing in place yet
+
+
+def test_rejection_reasons_are_counted(f, db):
+    _setup(db)
+    _m(f, db, 30)                    # passes
+    _m(f, db, 30, dq="MEDIUM")
+    _m(f, db, 30, width=0.30)
+    st = {}
+    picks = build_picks(db, stats=st)
+    assert len(picks) == 1
+    assert st["in_window"] == 3 and st["not_high_quality"] == 1 and st["too_uncertain"] == 1

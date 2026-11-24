@@ -113,7 +113,7 @@ def price_targets_job(db: Session) -> dict:
     return {"sent": len(d["match_ids"]), "channels": a.channels_sent if a else []}
 
 
-def build_picks(db: Session, now: datetime | None = None) -> list[dict]:
+def build_picks(db: Session, now: datetime | None = None, stats: dict | None = None) -> list[dict]:
     """Strongest conditional picks for live matches starting soon. One side per match, each match once, capped per
     local day. Returns [{"match", "pred", "side", "p", "min_american"}]."""
     cfg = get_setting(db, "alerts")
@@ -137,18 +137,34 @@ def build_picks(db: Session, now: datetime | None = None) -> list[dict]:
                                         Match.scheduled_at >= now + timedelta(minutes=lo_min),
                                         Match.scheduled_at <= now + timedelta(minutes=hi_min))
                     .order_by(Match.scheduled_at)).all()
+    st = stats if stats is not None else {}
+    def skip(reason):
+        st[reason] = st.get(reason, 0) + 1
+    st["in_window"] = len(ms)
     cands = []
     for m in ms:
         if str(m.id) in sent:
+            skip("already_sent")
             continue
         pred = latest_prediction(db, m.id)
-        if not pred or pred.data_quality != "HIGH":
+        if not pred:
+            skip("no_prediction")
+            continue
+        if pred.data_quality != "HIGH":
+            skip("not_high_quality")
             continue
         width = pred.p1_ci_high - pred.p1_ci_low
         f = pred.features or {}
         comps = list((pred.component_probs or {}).values()) or [pred.p1_win]
-        if width > max_width or min(f.get("_n1") or 0, f.get("_n2") or 0) < F["min_player_matches"] \
-                or max(comps) - min(comps) > F["max_model_disagreement"]:
+        if width > max_width:
+            skip("too_uncertain")
+            st.setdefault("widths", []).append(round(width, 3))
+            continue
+        if min(f.get("_n1") or 0, f.get("_n2") or 0) < F["min_player_matches"]:
+            skip("too_few_player_matches")
+            continue
+        if max(comps) - min(comps) > F["max_model_disagreement"]:
+            skip("models_disagree")
             continue
         best = None
         for side, p, lo in (("p1", pred.p1_win, pred.p1_ci_low), ("p2", 1 - pred.p1_win, 1 - pred.p1_ci_high)):
@@ -160,6 +176,8 @@ def build_picks(db: Session, now: datetime | None = None) -> list[dict]:
                 best = (premium, side, p, round_up_american(t))
         if best:
             cands.append((width, m, pred, best))
+        else:
+            skip("no_sensible_price")
     cands.sort(key=lambda c: (c[0], c[1].scheduled_at))
     picks = []
     for width, m, pred, (_, side, p, am) in (cands if room is None else cands[:room]):
@@ -178,8 +196,8 @@ def picks_job(db: Session) -> dict:
     from ttq.services.alerts import raise_alert
     from ttq.services.messages import conditional_pick_text
     from ttq.services.summary import log_picks
-    out, logged = [], []
-    for pk in build_picks(db):
+    out, logged, stats = [], [], {}
+    for pk in build_picks(db, stats=stats):
         m = pk["match"]
         title, body = conditional_pick_text(db, m, pk["pred"], pk["side"], pk["p"], pk["min_american"])
         a = raise_alert(db, "pick", title, body, f"pick:{m.id}", "INFO", False, rate_limited=False)
@@ -187,4 +205,7 @@ def picks_job(db: Session) -> dict:
         logged.append({"match_id": m.id, "side": pk["side"], "p": round(pk["p"], 4), "min_american": pk["min_american"]})
     if logged:
         log_picks(db, logged)
-    return {"sent": len(out), "picks": out}
+    if "widths" in stats:
+        w = sorted(stats.pop("widths"))
+        stats["too_uncertain_widths"] = {"min": w[0], "median": w[len(w) // 2], "max": w[-1]}
+    return {"sent": len(out), "picks": out, "checked": stats}
