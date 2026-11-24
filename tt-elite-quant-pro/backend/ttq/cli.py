@@ -15,14 +15,15 @@ def main():
     ap.add_argument("--password")
     ap.add_argument("--from-id", type=int, default=1)
     ap.add_argument("--to-id", type=int)
-    ap.add_argument("--window", type=int, default=120, help="cloud-run: send picks for matches starting within this many minutes")
+    ap.add_argument("--window", type=int, default=35, help="cloud-run: release each pick when its match is this many minutes away")
+    ap.add_argument("--hold", type=float, default=0, help="cloud-run: keep releasing picks every minute for this many minutes")
     a = ap.parse_args()
     if a.cmd == "hash-password":
         import bcrypt
         print(bcrypt.hashpw(a.password.encode(), bcrypt.gensalt()).decode()); return
     if a.cmd == "cloud-run":
         from ttq.services.cloud import cloud_cycle
-        print(json.dumps(cloud_cycle(a.window), indent=2, default=str)[:20000]); return
+        print(json.dumps(cloud_cycle(a.window, hold_minutes=a.hold), indent=2, default=str)[:20000]); return
     if a.cmd == "status":
         from ttq.services.status import system_status
         res = system_status()

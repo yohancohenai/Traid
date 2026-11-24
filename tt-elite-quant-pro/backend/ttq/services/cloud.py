@@ -5,6 +5,7 @@ then send conditional picks for every match starting within the look-ahead windo
 database (app_settings["picks_sent"]), which the workflow saves between runs, so no match is sent twice.
 """
 import logging
+import time
 
 from sqlalchemy import func, select
 
@@ -15,7 +16,12 @@ from ttq.services.app_settings import get_setting, set_setting
 log = logging.getLogger(__name__)
 
 
-def cloud_cycle(window_minutes: int = 120, min_minutes: int = 10) -> dict:
+def cloud_cycle(window_minutes: int = 35, min_minutes: int = 10, hold_minutes: float = 0, sleep=time.sleep,
+                clock=time.monotonic) -> dict:
+    """window_minutes is the lead time: a pick is released when its match is at most this far away, so picks arrive
+    one at a time, each about `window_minutes` before its start. With hold_minutes > 0 the run stays alive and checks
+    every minute, releasing each pick as its match reaches the lead time."""
+    started = clock()
     out: dict = {}
 
     def first_run(db):
@@ -54,4 +60,11 @@ def cloud_cycle(window_minutes: int = 120, min_minutes: int = 10) -> dict:
         from ttq.services.summary import weekly_summary_job
         return weekly_summary_job(db)
     out["weekly_summary"] = jobs.run_job("weekly_summary", weekly)
+
+    released = 0
+    while clock() - started + 60 < hold_minutes * 60:
+        sleep(60)
+        r = jobs.run_job("picks", picks)
+        released += (r or {}).get("sent", 0) if isinstance(r, dict) else 0
+    out["released_while_waiting"] = released
     return out
