@@ -103,7 +103,8 @@ def _picks(db: Session, tz) -> tuple[list[dict], dict]:
             else:
                 rec["bl"] += 1
                 rec["bunits"] -= 1
-        out.append({"sent": _fmt(datetime.fromisoformat(pk["sent_at"]), tz), "match_time": _fmt(m.scheduled_at, tz),
+        out.append({"_at": as_utc(m.scheduled_at).astimezone(tz).isoformat(),
+                    "sent": _fmt(datetime.fromisoformat(pk["sent_at"]), tz), "match_time": _fmt(m.scheduled_at, tz),
                     "match": f"{m.player1.canonical_name} vs {m.player2.canonical_name}", "pick": name,
                     "prob": pk.get("p"), "min": pk["min_american"], "hr_action": pk.get("hr_action"), "hr_price": hr,
                     "score": f"{m.sets_p1}-{m.sets_p2}" if m.sets_p1 is not None else None,
@@ -113,6 +114,48 @@ def _picks(db: Session, tz) -> tuple[list[dict], dict]:
     return out, rec
 
 
+def _stats(picks: list[dict]) -> dict:
+    """Hit rate and performance stats over settled picks (graded at each pick's minimum price, 1 unit each)."""
+    settled = sorted((p for p in picks if p["result"] in ("won", "lost")), key=lambda p: p["_at"])
+    n = len(settled)
+    wins = sum(p["result"] == "won" for p in settled)
+    units = sum(p["units"] for p in settled)
+    exp = sum(p["prob"] or 0 for p in settled) / n if n else None
+    curve, run = [], 0.0
+    for i, p in enumerate(settled, 1):
+        run += p["units"]
+        curve.append({"i": i, "units": round(run, 2), "label": f"{p['pick']} ({p['result']})", "time": p["match_time"]})
+    streak = ""
+    if settled:
+        last = settled[-1]["result"]
+        k = 0
+        for p in reversed(settled):
+            if p["result"] != last:
+                break
+            k += 1
+        streak = f"{'W' if last == 'won' else 'L'}{k}"
+    by_day: dict[str, dict] = {}
+    for p in settled:
+        d = by_day.setdefault(p["_at"][:10], {"date": p["_at"][:10], "w": 0, "l": 0, "units": 0.0})
+        d["w" if p["result"] == "won" else "l"] += 1
+        d["units"] = round(d["units"] + p["units"], 2)
+    buckets = {}
+    for name, test in (("Favorites (minimum below +100)", lambda a: a < 0),
+                       ("Underdogs (minimum +100 or more)", lambda a: a >= 0)):
+        grp = [p for p in settled if test(p["min"])]
+        gw = sum(p["result"] == "won" for p in grp)
+        buckets[name] = {"n": len(grp), "w": gw, "l": len(grp) - gw,
+                         "hit": (gw / len(grp)) if grp else None,
+                         "units": round(sum(p["units"] for p in grp), 2)}
+    return {"settled": n, "wins": wins, "losses": n - wins, "hit_rate": (wins / n) if n else None,
+            "expected_hit_rate": exp, "units": round(units, 2), "roi": (units / n) if n else None,
+            "avg_min_price": round(sum(p["min"] for p in settled) / n) if n else None,
+            "pending": sum(p["result"] == "pending" for p in picks), "voids": sum(p["result"] == "void" for p in picks),
+            "total": len(picks), "streak": streak, "last10": "".join("W" if p["result"] == "won" else "L" for p in settled[-10:]),
+            "curve": curve, "by_day": sorted(by_day.values(), key=lambda d: d["date"], reverse=True)[:14],
+            "buckets": buckets}
+
+
 def build_data(db: Session, now: datetime | None = None) -> dict:
     now = now or utcnow()
     tz = _tz(db)
@@ -120,14 +163,20 @@ def build_data(db: Session, now: datetime | None = None) -> dict:
     n_done = db.scalar(select(func.count(Match.id)).where(Match.is_demo.is_(False), Match.status == "FINISHED")) or 0
     picks, rec = _picks(db, tz)
     cfg = get_setting(db, "alerts")
+    test = (champ.metrics or {}).get("test", {}) if champ else {}
+    upcoming = _upcoming(db, now, tz)
     return {
+        "stats": _stats(picks),
+        "model_test": {"accuracy": test.get("accuracy"), "log_loss": test.get("log_loss"), "n": test.get("n")},
+        "upcoming_passing": sum(u["status"] == "passes rules" for u in upcoming),
         "updated": _fmt(now, tz),
         "model": f"{champ.name}_{champ.version}" if champ else None,
         "trained": champ.trained_at.strftime("%Y-%m-%d") if champ and champ.trained_at else None,
         "matches_in_history": n_done,
         "rules": {"min_ev": get_filters(db, False)["min_ev"], "max_uncertainty": cfg.get("picks_max_interval"),
                   "lead_minutes": cfg.get("picks_max_minutes")},
-        "record": rec, "picks": picks[:200], "upcoming": _upcoming(db, now, tz),
+        "record": rec, "picks": [{k: v for k, v in p.items() if k != "_at"} for p in picks[:200]],
+        "upcoming": upcoming,
     }
 
 

@@ -40,3 +40,18 @@ def test_write_site_publishes_only_ciphertext(f, db, tmp_path):
     blob = json.loads((tmp_path / "data.json").read_text())
     assert set(blob) == {"v", "iter", "salt", "iv", "ct"}
     assert decrypt(blob, "pw")["record"]["w"] == 0 and out["picks"] == 0
+
+
+def test_stats_hit_rate_curve_and_buckets():
+    from ttq.services.dashboard import _stats
+    mk = lambda at, res, mn, u, p=0.55: {"_at": at, "result": res, "min": mn, "units": u, "prob": p,
+                                         "pick": "X", "match_time": at}
+    picks = [mk("2026-11-24T10:00", "won", 105, 1.05), mk("2026-11-24T11:00", "lost", -120, -1.0),
+             mk("2026-11-25T10:00", "won", -120, 0.83), {**mk("2026-11-25T12:00", "pending", 110, None)}]
+    s = _stats(picks)
+    assert (s["settled"], s["wins"], s["losses"], s["pending"]) == (3, 2, 1, 1)
+    assert abs(s["hit_rate"] - 2 / 3) < 1e-9 and s["units"] == 0.88 and s["streak"] == "W1" and s["last10"] == "WLW"
+    assert [c["units"] for c in s["curve"]] == [1.05, 0.05, 0.88]
+    assert s["by_day"][0] == {"date": "2026-11-25", "w": 1, "l": 0, "units": 0.83}
+    fav = s["buckets"]["Favorites (minimum below +100)"]
+    assert (fav["w"], fav["l"]) == (1, 1)
