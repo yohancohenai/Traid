@@ -5,8 +5,8 @@ def test_cloud_cycle_runs_every_step_in_order(monkeypatch):
     calls = []
     monkeypatch.setattr(jobs, "run_job", lambda name, fn, *a, **k: calls.append(name) or {"ok": True})
     out = cloud.cloud_cycle(120)
-    assert calls == ["cloud_history", "cloud_window", "ingest_results", "retrain", "predict_scan", "settle", "picks"]
-    assert set(out) == {"history", "window", "results", "retrain", "predict", "settle", "picks"}
+    assert calls == ["cloud_history", "cloud_window", "picks", "ingest_results", "retrain", "predict_scan", "settle", "picks"]
+    assert set(out) == {"history", "window", "picks_early", "results", "retrain", "predict", "settle", "picks"}
 
 
 def test_cloud_window_sets_two_hour_lookahead(db):

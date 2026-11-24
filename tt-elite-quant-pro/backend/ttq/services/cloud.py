@@ -30,6 +30,12 @@ def cloud_cycle(window_minutes: int = 120, min_minutes: int = 10) -> dict:
         return {"window": [min_minutes, window_minutes]}
     out["window"] = jobs.run_job("cloud_window", window)
 
+    def picks(db):
+        from ttq.services.targets import picks_job
+        return picks_job(db)
+    # Send picks from the previous run's predictions straight away, before the slower steps below.
+    out["picks_early"] = jobs.run_job("picks", picks)
+
     out["results"] = jobs.run_job("ingest_results", jobs.ingest_results_job)
 
     def retrain_live(db):
@@ -42,8 +48,5 @@ def cloud_cycle(window_minutes: int = 120, min_minutes: int = 10) -> dict:
     out["predict"] = jobs.run_job("predict_scan", jobs.predict_scan_job)
     out["settle"] = jobs.run_job("settle", jobs.settle_job)
 
-    def picks(db):
-        from ttq.services.targets import picks_job
-        return picks_job(db)
     out["picks"] = jobs.run_job("picks", picks)
     return out
