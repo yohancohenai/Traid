@@ -202,7 +202,9 @@ def picks_job(db: Session) -> dict:
         title, body = conditional_pick_text(db, m, pk["pred"], pk["side"], pk["p"], pk["min_american"])
         a = raise_alert(db, "pick", title, body, f"pick:{m.id}", "INFO", False, rate_limited=False)
         out.append({"match_id": m.id, "side": pk["side"], "min": pk["min_american"], "channels": a.channels_sent if a else []})
-        logged.append({"match_id": m.id, "side": pk["side"], "p": round(pk["p"], 4), "min_american": pk["min_american"]})
+        logged.append({"match_id": m.id, "side": pk["side"], "p": round(pk["p"], 4), "min_american": pk["min_american"],
+                       "tg_msg": getattr(a, "telegram_message_id", None) if a else None,
+                       "pick_name": m.player1.canonical_name if pk["side"] == "p1" else m.player2.canonical_name})
     if logged:
         log_picks(db, logged)
     if "widths" in stats:

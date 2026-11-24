@@ -67,9 +67,41 @@ def grade(db: Session, since: datetime, until: datetime) -> dict:
             losses += 1
             units -= 1
     n = wins + losses
-    return {"picks": n + voids + pending, "wins": wins, "losses": losses, "voids": voids, "pending": pending,
+    hr = _hard_rock(db, since, until)
+    return {**hr, "picks": n + voids + pending, "wins": wins, "losses": losses, "voids": voids, "pending": pending,
             "units": round(units, 2), "roi": (units / staked) if staked else None,
             "win_rate": (wins / n) if n else None, "expected_win_rate": (prob_sum / n) if n else None}
+
+
+def _hard_rock(db: Session, since: datetime, until: datetime) -> dict:
+    """Your logged Hard Rock prices: how often the line beat the minimum, and your real bets graded at your price."""
+    row = _row(db, "picks_log")
+    seen = beat = 0
+    bw = bl = 0
+    bunits = 0.0
+    for mid, pk in (row.value if row else {}).items():
+        if not (since <= datetime.fromisoformat(pk["sent_at"]) < until) or not pk.get("hr_action"):
+            continue
+        if pk["hr_action"] == "skip":
+            seen += 1
+            continue
+        seen += 1
+        price = pk.get("hr_price")
+        if price is not None and american_to_decimal(price) >= american_to_decimal(pk["min_american"]) - 1e-9:
+            beat += 1
+        if pk["hr_action"] != "bet" or price is None:
+            continue
+        m = db.get(Match, int(mid))
+        if m is None or m.winner_id is None or m.status != "FINISHED":
+            continue
+        picked = m.player1_id if pk["side"] == "p1" else m.player2_id
+        if m.winner_id == picked:
+            bw += 1
+            bunits += american_to_decimal(price) - 1
+        else:
+            bl += 1
+            bunits -= 1
+    return {"hr_logged": seen, "hr_beat_min": beat, "bets_w": bw, "bets_l": bl, "bets_units": round(bunits, 2)}
 
 
 def summary_text(week: dict, all_time: dict, start, end) -> str:
@@ -83,6 +115,12 @@ def summary_text(week: dict, all_time: dict, start, end) -> str:
     extra = [f"{week[k]} {k}" for k in ("voids", "pending") if week[k]]
     if extra:
         lines.append("Not graded: " + ", ".join(extra))
+    if week.get("hr_logged"):
+        lines.append(f"Hard Rock prices you logged: {week['hr_logged']} | at/above minimum: {week['hr_beat_min']}")
+    if week.get("bets_w", 0) + week.get("bets_l", 0):
+        n = week["bets_w"] + week["bets_l"]
+        lines.append(f"Your real bets: {week['bets_w']}-{week['bets_l']} | {week['bets_units']:+.2f} units "
+                     f"| ROI {week['bets_units'] / n:+.1%} (at your prices)")
     lines += [f"Last 90 days: {line(all_time)}", "",
               "Graded at each pick's minimum price (1 unit each). Better Hard Rock prices only improve this.",
               "Small samples swing a lot; judge the bot over hundreds of picks."]

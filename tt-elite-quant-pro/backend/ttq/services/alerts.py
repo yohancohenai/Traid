@@ -39,9 +39,13 @@ def _send_telegram(title, body):
     s = get_settings()
     if not (s.telegram_bot_token and s.telegram_chat_id):
         return False
-    httpx.post(f"https://api.telegram.org/bot{s.telegram_bot_token}/sendMessage",
-               json={"chat_id": s.telegram_chat_id, "text": f"{title}\n{body}"}, timeout=15).raise_for_status()
-    return True
+    r = httpx.post(f"https://api.telegram.org/bot{s.telegram_bot_token}/sendMessage",
+                   json={"chat_id": s.telegram_chat_id, "text": f"{title}\n{body}"}, timeout=15)
+    r.raise_for_status()
+    try:
+        return r.json()["result"]["message_id"] or True   # message id lets replies be matched to this message
+    except Exception:  # noqa
+        return True
 
 
 def send_test_alert() -> dict:
@@ -66,6 +70,7 @@ def raise_alert(db: Session, kind: str, title: str, body: str, dedupe_key: str, 
     recent = db.scalar(select(Alert).where(Alert.kind == kind, Alert.created_at >= utcnow() - timedelta(seconds=cfg["min_interval_seconds"]))
                        .order_by(Alert.created_at.desc()).limit(1))
     channels = ["browser"] if cfg["browser"] else []
+    tg_id = None
     if (not recent or not rate_limited) and not is_demo:  # external channels are rate limited and never fire for DEMO data
         try:
             if cfg["email"] and _send_email(title, body):
@@ -73,8 +78,10 @@ def raise_alert(db: Session, kind: str, title: str, body: str, dedupe_key: str, 
         except Exception:  # noqa
             log.exception("email alert failed")
         try:
-            if cfg["telegram"] and _send_telegram(title, body):
+            sent = cfg["telegram"] and _send_telegram(title, body)
+            if sent:
                 channels.append("telegram")
+                tg_id = sent if isinstance(sent, int) and not isinstance(sent, bool) else None
         except Exception:  # noqa
             log.exception("telegram alert failed")
     a = Alert(kind=kind, title=("[DEMO] " if is_demo and not title.startswith("[DEMO]") else "") + title, body=body, dedupe_key=dedupe_key,
@@ -84,4 +91,5 @@ def raise_alert(db: Session, kind: str, title: str, body: str, dedupe_key: str, 
             db.add(a)
     except IntegrityError:
         return None
+    a.telegram_message_id = tg_id   # not stored on the row; picks_job keeps it in the picks log
     return a

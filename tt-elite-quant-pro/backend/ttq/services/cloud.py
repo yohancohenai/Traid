@@ -40,6 +40,11 @@ def cloud_cycle(window_minutes: int = 35, min_minutes: int = 10, hold_minutes: f
     def picks(db):
         from ttq.services.targets import picks_job
         return picks_job(db)
+    def replies(db):
+        from ttq.services.price_log import poll_replies
+        return poll_replies(db)
+    out["replies"] = jobs.run_job("price_replies", replies)
+
     # Send picks from the previous run's predictions straight away, before the slower steps below.
     out["picks_early"] = jobs.run_job("picks", picks)
 
@@ -65,6 +70,7 @@ def cloud_cycle(window_minutes: int = 35, min_minutes: int = 10, hold_minutes: f
     released = 0
     while clock() - started + 60 < hold_minutes * 60:
         sleep(60)
+        jobs.run_job("price_replies", replies)
         r = jobs.run_job("picks", picks)
         released += (r or {}).get("sent", 0) if isinstance(r, dict) else 0
     out["released_while_waiting"] = released
