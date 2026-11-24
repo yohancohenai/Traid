@@ -70,15 +70,16 @@ def conditional_pick_text(db: Session, m: Match, pred: Prediction, side: str, p:
     alerts = get_setting(db, "alerts")
     pick = m.player1.canonical_name if side == "p1" else m.player2.canonical_name
     dec = american_to_decimal(min_american)
+    ruleset_date = (F.get("selected_by") or "default").replace("calib-period grid ", "calib ")
     body = "\n".join([
         f"{m.player1.canonical_name} vs {m.player2.canonical_name}",
         f"Pick: {pick} ({'HOME' if side == 'p1' else 'AWAY'})",
-        f"Bet only if Hard Rock odds >= {min_american:+d} ({dec:.2f})",
-        f"Prob: {p:.1%} | EV at that price: {p * dec - 1:.1%}+",
+        f"Odds: {dec:.2f} ({min_american:+d}) | Prob: {p:.1%} | EV: {p * dec - 1:.1%}",
         f"Units: {float(alerts.get('units_per_bet', 1.0)):.1f}",
         f"Match: {_match_time(db, m)}",
         f"Model: {_model_line(db, pred)}",
-        f"Ruleset: EV>={F['min_ev']:.0%}, EV@low>={F['min_ev_low']:.0%} (conditional; market-edge check skipped)",
-        "If Hard Rock's price is lower, skip it. Estimated EV is not a guarantee.",
+        f"Ruleset: EV>={F['min_ev']:.0%}, edge>={F['min_edge']:.0%}, EV@low>={F['min_ev_low']:.0%} ({ruleset_date})",
+        "",
+        f"Bet only if Hard Rock odds >= {min_american:+d} ({dec:.2f})",
     ])
-    return "New Bet Recommendation (conditional)", body
+    return "New Bet Recommendation", body

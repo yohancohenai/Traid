@@ -71,13 +71,13 @@ def test_message_layout(f, db):
     pred = db.query(Prediction).filter_by(match_id=m.id).one(); pred.model_version_id = mv.id
     title, body = conditional_pick_text(db, m, pred, "p1", 0.588, 135)
     lines = body.splitlines()
-    assert title == "New Bet Recommendation (conditional)"
+    assert title == "New Bet Recommendation"
     assert lines[:3] == ["Mateusz Baran vs Miroslaw Lewczuk", "Pick: Mateusz Baran (HOME)",
-                         "Bet only if Hard Rock odds >= +135 (2.35)"]
-    assert lines[3] == "Prob: 58.8% | EV at that price: 38.2%+"
-    assert lines[5] == "Match: Nov 23, 7:10 PM ET"
-    assert lines[6] == "Model: dyn_elo_20261123162333 (2026-11-23)"
-    assert "skip" in lines[-1]
+                         "Odds: 2.35 (+135) | Prob: 58.8% | EV: 38.2%"]
+    assert lines[4] == "Match: Nov 23, 7:10 PM ET"
+    assert lines[5] == "Model: dyn_elo_20261123162333 (2026-11-23)"
+    assert lines[6].startswith("Ruleset: EV>=")
+    assert lines[-1] == "Bet only if Hard Rock odds >= +135 (2.35)"
 
 
 def test_job_sends_every_pick(f, db, monkeypatch):
