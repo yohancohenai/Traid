@@ -1,0 +1,91 @@
+# TT Elite Quant Pro - always-on bot on GitHub's free servers (no laptop needed).
+# Every 30 minutes: fetch official tt-series.com results, retrain when due, predict, and send Telegram picks for
+# every match starting in the next 2 hours. Nothing is ever bet automatically.
+# The bot's memory (database + trained model) is saved in the Actions cache between runs.
+name: TT bot
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"     # every 30 min (off the hour: GitHub delays :00 runs most)
+  workflow_dispatch: {}
+
+concurrency:
+  group: tt-bot
+  cancel-in-progress: false    # never run two at once; a long first run just delays the next
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100       # the first run downloads the full history (~40 min) and trains
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ttq
+          POSTGRES_PASSWORD: ttq
+          POSTGRES_DB: ttq
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ttq" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TTQ_DATABASE_URL: postgresql+psycopg://ttq:ttq@localhost:5432/ttq
+      TTQ_ARTIFACTS_DIR: ${{ github.workspace }}/state/artifacts
+      TTQ_ENABLE_DEMO: "false"
+      TTQ_TELEGRAM_BOT_TOKEN: ${{ secrets.TTQ_TELEGRAM_BOT_TOKEN }}
+      TTQ_TELEGRAM_CHAT_ID: ${{ secrets.TTQ_TELEGRAM_CHAT_ID }}
+      TTQ_JWT_SECRET: not-used-in-bot-mode
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/tt-elite-quant-pro-6b6pj7
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tt-elite-quant-pro/backend/pyproject.toml
+
+      - name: Install
+        working-directory: tt-elite-quant-pro/backend
+        run: |
+          sudo apt-get install -y --no-install-recommends libgomp1 >/dev/null
+          pip install -q -e .
+
+      - name: Restore bot memory
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: ttq-state-${{ github.run_id }}
+          restore-keys: ttq-state-
+
+      - name: Load database
+        run: |
+          mkdir -p state/artifacts
+          if [ -f state/db.dump ]; then
+            docker exec -i ${{ job.services.postgres.id }} pg_restore -U ttq -d ttq --no-owner < state/db.dump
+            echo "restored saved database"
+          else
+            echo "first run: starting fresh (full history download)"
+          fi
+
+      - name: Bot cycle
+        working-directory: tt-elite-quant-pro/backend
+        run: |
+          alembic upgrade head
+          python -m ttq.cli cloud-run --window 120 | tail -c 6000
+
+      - name: Save database
+        if: always()
+        run: |
+          docker exec ${{ job.services.postgres.id }} pg_dump -U ttq -Fc ttq > state/db.dump
+          du -sh state
+
+      - name: Save bot memory
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: ttq-state-${{ github.run_id }}
