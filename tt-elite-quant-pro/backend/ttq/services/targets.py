@@ -198,39 +198,73 @@ def build_picks(db: Session, now: datetime | None = None, stats: dict | None = N
 
 MARKET_DISAGREE = 0.0     # model and market must agree: at Hard Rock's price the consensus of the other books must not say -EV
 HR_OUTLIER = 0.12         # skip if Hard Rock's no-vig chance is 12+ points away from every other book (stale/void line)
+PRICE_MIN, PRICE_MAX = 1.50, 3.00   # only -200 to +200: no -500 favourites (one loss wipes out five wins)
+MAX_FAV_TO_CHECK = 0.80   # don't spend a credit on huge favourites: their price can't land in the band
 
 
-def decide_with_market(side: str, p: float, min_american: int, mk: dict | None) -> tuple[bool, dict]:
-    """Use the live market (if we have it) to confirm or reject a model pick. Returns (send, info)."""
+def _sides(pred, p_fav: float, fav_side: str) -> list[tuple[str, float, float]]:
+    """Both sides of a calibrated match (favourite at 60%+ means the underdog is in the calibrated 20-40% zone):
+    (side, model chance, low end of the model's range)."""
+    p1, lo1, hi1 = pred.p1_win, pred.p1_ci_low, pred.p1_ci_high
+    return [("p1", p1, lo1), ("p2", 1 - p1, 1 - hi1)]
+
+
+def decide_with_market(side: str, p: float, min_american: int, mk: dict | None, pred=None,
+                       F: dict | None = None) -> tuple[bool, dict]:
+    """A pick is sent only when the live market confirms a mispriced Hard Rock line:
+    Hard Rock's price is in the -200..+200 band, the model has >= min_ev at that price (and >= min_ev_low at the low
+    end of its range), and the consensus of the other books also says +EV. Either side of the match can qualify;
+    the side with the biggest edge vs the market wins. No market data -> no pick."""
     info: dict = {"market": (mk or {}).get("status", "not checked")}
     if not mk or mk.get("status") != "ok":
-        return True, info
+        info["reason"] = "no live market data, so no pick"
+        return False, info
     info["books"] = mk.get("books")
     cons_p1 = mk.get("consensus_p1")
-    cons = None if cons_p1 is None else (cons_p1 if side == "p1" else 1 - cons_p1)
-    info["consensus_p"] = round(cons, 4) if cons is not None else None
     hr = mk.get("hard_rock")
     if not hr:
         info["reason"] = "Hard Rock not pricing it"
-        return True, info
-    hr_dec = hr[0] if side == "p1" else hr[1]
-    hr_novig = (1 / hr_dec) / (1 / hr[0] + 1 / hr[1])
+        return False, info
+    if cons_p1 is None:
+        info["reason"] = "too few books for a fair price"
+        return False, info
+    F = F or {"min_ev": 0.03, "min_ev_low": 0.0}
     from ttq.odds.math import decimal_to_american
-    info["hr_american"] = decimal_to_american(hr_dec)
-    info["hr_decimal"] = round(hr_dec, 3)
-    info["model_ev_at_hr"] = round(p * hr_dec - 1, 4)
-    info["market_ev_at_hr"] = round(cons * hr_dec - 1, 4) if cons is not None else None
-    if cons is not None and abs(hr_novig - cons) > HR_OUTLIER:
-        info["reason"] = (f"Hard Rock's line ({hr_novig:.0%}) is far from every other book ({cons:.0%}); "
+    hr_novig_p1 = (1 / hr[0]) / (1 / hr[0] + 1 / hr[1])
+    if abs(hr_novig_p1 - cons_p1) > HR_OUTLIER:
+        info["reason"] = (f"Hard Rock's line ({hr_novig_p1:.0%}) is far from every other book ({cons_p1:.0%}); "
                           "possible stale or void line")
         return False, info
-    if hr_dec < american_to_decimal(min_american) - 1e-9:
-        info["reason"] = f"Hard Rock {info['hr_american']:+d} is below the minimum {min_american:+d}"
+    sides = _sides(pred, p, side) if pred is not None else [(side, p, p)]
+    best, notes = None, []
+    for sd, mp, lo in sides:
+        dec = hr[0] if sd == "p1" else hr[1]
+        cons = cons_p1 if sd == "p1" else 1 - cons_p1
+        row = {"side": sd, "p": round(mp, 4), "hr_american": decimal_to_american(dec), "hr_decimal": round(dec, 3),
+               "consensus_p": round(cons, 4), "model_ev_at_hr": round(mp * dec - 1, 4),
+               "model_ev_low_at_hr": round(lo * dec - 1, 4), "market_ev_at_hr": round(cons * dec - 1, 4)}
+        if not (PRICE_MIN <= dec <= PRICE_MAX):
+            notes.append(f"{sd} {row['hr_american']:+d} outside -200..+200")
+            continue
+        if row["model_ev_at_hr"] < F["min_ev"] or row["model_ev_low_at_hr"] < F["min_ev_low"]:
+            notes.append(f"{sd} {row['hr_american']:+d}: model edge {row['model_ev_at_hr']:+.1%} too small")
+            continue
+        if row["market_ev_at_hr"] < MARKET_DISAGREE:
+            notes.append(f"{sd} {row['hr_american']:+d}: other books say {row['market_ev_at_hr']:+.1%}")
+            continue
+        if best is None or row["market_ev_at_hr"] > best["market_ev_at_hr"]:
+            best = row
+    if best is None:
+        info["reason"] = "; ".join(notes) or "no side passes"
+        # keep the favourite's numbers for the log
+        sd, mp, _ = sides[0] if (pred is None or sides[0][1] >= 0.5) else sides[1]
+        dec = hr[0] if sd == "p1" else hr[1]
+        info.update({"side": sd, "hr_american": decimal_to_american(dec), "hr_decimal": round(dec, 3),
+                     "consensus_p": round(cons_p1 if sd == "p1" else 1 - cons_p1, 4),
+                     "market_ev_at_hr": round((cons_p1 if sd == "p1" else 1 - cons_p1) * dec - 1, 4)})
         return False, info
-    if info["market_ev_at_hr"] is not None and info["market_ev_at_hr"] < MARKET_DISAGREE:
-        info["reason"] = f"other books disagree (market EV {info['market_ev_at_hr']:+.1%} at Hard Rock's price)"
-        return False, info
-    info["reason"] = "Hard Rock price passes"
+    info.update(best)
+    info["reason"] = "misplaced Hard Rock line: model and market both say +EV"
     return True, info
 
 
@@ -309,11 +343,19 @@ def picks_job(db: Session) -> dict:
     out, logged, stats, skipped = [], [], {}, []
     for pk in build_picks(db, stats=stats):
         m = pk["match"]
-        try:
-            mk = market_check(db, m.player1.canonical_name, m.player2.canonical_name, m.scheduled_at)
-        except Exception:  # noqa
-            mk = {"status": "error"}
-        send, info = decide_with_market(pk["side"], pk["p"], pk["min_american"], mk)
+        if pk["p"] > MAX_FAV_TO_CHECK:
+            mk = {"status": "skipped: favourite too short to land in -200..+200"}
+        else:
+            try:
+                mk = market_check(db, m.player1.canonical_name, m.player2.canonical_name, m.scheduled_at)
+            except Exception:  # noqa
+                mk = {"status": "error"}
+        send, info = decide_with_market(pk["side"], pk["p"], pk["min_american"], mk, pk["pred"], get_filters(db, False))
+        if send and info.get("side") and info["side"] != pk["side"]:      # the market made the other side the play
+            pk = {**pk, "side": info["side"], "p": info["p"]}
+            t = side_target(info["p"], (pk["pred"].p1_ci_low if info["side"] == "p1" else 1 - pk["pred"].p1_ci_high),
+                            get_filters(db, False))
+            pk["min_american"] = round_up_american(t) if t else info["hr_american"]
         info["units"] = suggested_units(db, info.get("market_ev_at_hr"), info.get("hr_decimal"))
         name = m.player1.canonical_name if pk["side"] == "p1" else m.player2.canonical_name
         _log_market_check(db, {"at": utcnow().isoformat(), "match_id": m.id, "match": f"{m.player1.canonical_name} vs "

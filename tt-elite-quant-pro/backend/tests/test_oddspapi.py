@@ -71,21 +71,40 @@ def test_market_check_orients_to_our_player1(db, monkeypatch):
     assert op.usage(db)["today"] == 2
 
 
+class _Pred:
+    def __init__(self, p1, lo, hi):
+        self.p1_win, self.p1_ci_low, self.p1_ci_high = p1, lo, hi
+
+
 def test_decision_rules():
-    ok = {"status": "ok", "books": 36, "hard_rock": (1.80, 2.0), "consensus_p1": 0.56}
-    send, info = decide_with_market("p1", 0.62, -135, ok)        # HR -125 beats -135 minimum, market agrees
-    assert send and info["hr_american"] == -125 and info["market_ev_at_hr"] > 0
-    send, info = decide_with_market("p1", 0.62, -135, {**ok, "hard_rock": (1.625, 2.15)})
-    assert not send and "below the minimum" in info["reason"]
-    send, info = decide_with_market("p1", 0.70, -135, {**ok, "hard_rock": (1.80, 2.0), "consensus_p1": 0.50})
-    assert not send and "disagree" in info["reason"]
-    assert decide_with_market("p1", 0.62, -135, None)[0] is True          # no market data: pick goes out as before
-    assert decide_with_market("p1", 0.62, -135, {**ok, "hard_rock": None})[0] is True
+    pred = _Pred(0.64, 0.60, 0.68)
+    ok = {"status": "ok", "books": 36, "hard_rock": (1.80, 2.0), "consensus_p1": 0.58}
+    send, info = decide_with_market("p1", 0.64, -135, ok, pred)            # HR -125, market fair 58% -> +4.4%
+    assert send and info["side"] == "p1" and info["hr_american"] == -125 and info["market_ev_at_hr"] > 0
+    send, info = decide_with_market("p1", 0.64, -135, {**ok, "hard_rock": (1.50, 2.5), "consensus_p1": 0.64}, pred)
+    assert not send                                                         # -200 but market says -4%
+    assert decide_with_market("p1", 0.64, -135, None, pred)[0] is False     # no market -> no pick
+    assert decide_with_market("p1", 0.64, -135, {**ok, "hard_rock": None}, pred)[0] is False
+
+
+def test_heavy_favourite_outside_band_is_never_sent():
+    pred = _Pred(0.88, 0.85, 0.91)
+    mk = {"status": "ok", "books": 30, "hard_rock": (1.20, 4.5), "consensus_p1": 0.82}   # -500
+    send, info = decide_with_market("p1", 0.88, -550, mk, pred)
+    assert not send and "outside -200..+200" in info["reason"]
+
+
+def test_underdog_can_be_the_misplaced_line():
+    pred = _Pred(0.62, 0.58, 0.66)       # model: underdog 38% (low end 34%)
+    mk = {"status": "ok", "books": 30, "hard_rock": (1.40, 3.0), "consensus_p1": 0.64}  # dog +200, market dog 36%
+    send, info = decide_with_market("p1", 0.62, -135, mk, pred)
+    assert send and info["side"] == "p2" and info["hr_american"] == 200
+
 
 
 def test_hard_rock_outlier_is_skipped():
     mk = {"status": "ok", "books": 30, "hard_rock": (1.25, 4.0), "consensus_p1": 0.60}   # HR ~76% vs market 60%
-    send, info = decide_with_market("p2", 0.62, -135, {**mk})
+    send, info = decide_with_market("p2", 0.62, -135, {**mk}, _Pred(0.38, 0.34, 0.42))
     assert not send and "far from every other book" in info["reason"]
 
 
@@ -127,5 +146,28 @@ def test_set_market_calibration_values():
 
 def test_market_must_not_say_negative_ev():
     mk = {"status": "ok", "books": 30, "hard_rock": (1.76, 2.05), "consensus_p1": 0.56}   # 0.56*1.76 = 0.986
-    send, info = decide_with_market("p1", 0.64, -135, mk)
-    assert not send and info["market_ev_at_hr"] < 0
+    send, info = decide_with_market("p1", 0.64, -135, mk, _Pred(0.64, 0.60, 0.68))
+    assert not send
+
+
+def test_credits_are_paced_through_the_day():
+    from datetime import datetime, timezone
+    at = lambda h: datetime(2026, 11, 25, h, tzinfo=timezone.utc)
+    assert op.paced_allowance(7, at(0)) == 1 and op.paced_allowance(7, at(9)) == 4 and op.paced_allowance(7, at(23)) == 7
+
+
+def test_cached_fixture_list_costs_nothing(db, monkeypatch):
+    monkeypatch.setenv("ODDSPAPI_KEY", "k")
+    st = utcnow() + timedelta(minutes=30)
+    op._put_row(db, "oddspapi_fixtures", {"fixtures": [{"fixtureId": "x1", "startTime": st.isoformat(),
+                                                        "participant1Name": "Brunner, Marian",
+                                                        "participant2Name": "Pyrek, Dawid"}],
+                                          "fetched_at": (utcnow() - timedelta(hours=10)).isoformat(), "until": "2099"})
+    urls = []
+    class R:
+        status_code = 200
+        def json(self): return {"bookmakerOdds": {}}
+    monkeypatch.setattr(op.httpx, "get", lambda url, **k: urls.append(url) or R())
+    monkeypatch.setattr(op, "paced_allowance", lambda cap, now: cap)
+    op.market_check(db, "Marian Brunner", "Dawid Pyrek", st)
+    assert len(urls) == 1 and urls[0].endswith("/odds")          # no list refresh on a cache hit

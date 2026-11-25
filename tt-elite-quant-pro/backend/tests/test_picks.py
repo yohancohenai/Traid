@@ -88,9 +88,20 @@ def test_job_sends_every_pick(f, db, monkeypatch):
     sent = []
     monkeypatch.setattr("ttq.services.alerts._send_telegram", lambda t, b: sent.append(t) or True)
     monkeypatch.setattr("ttq.services.alerts._send_email", lambda t, b: False)
+    # Hard Rock pays +105 on a 66% favourite while the other books price it ~60%: a misplaced line
+    monkeypatch.setattr("ttq.providers.oddspapi.market_check",
+                        lambda *a, **k: {"status": "ok", "books": 30, "hard_rock": (1.70, 2.20), "consensus_p1": 0.62})
     r = picks_job(db)
     assert r["sent"] == 3 and len(sent) == 3
     assert db.query(Alert).filter_by(kind="pick").count() == 3
+
+
+def test_no_market_data_means_no_pick(f, db, monkeypatch):
+    _setup(db)
+    _m(f, db, 30)
+    monkeypatch.setattr("ttq.providers.oddspapi.market_check", lambda *a, **k: {"status": "no_budget"})
+    r = picks_job(db)
+    assert r["sent"] == 0 and "no live market data" in r["skipped_by_market"][0]["reason"]
 
 
 def test_no_daily_cap_by_default(f, db):

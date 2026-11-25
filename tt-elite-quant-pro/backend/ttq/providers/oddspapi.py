@@ -28,7 +28,7 @@ BASE = "https://api.oddspapi.io/v4"
 TT_ELITE_TOURNAMENT = 36377
 WINNER = "251"
 HARD_ROCK = "hardrockbet"
-FIXTURE_REFRESH = timedelta(hours=3)
+FIXTURE_REFRESH = timedelta(hours=6)   # the TT Elite list (2 days ahead) is re-read only on a miss, at most every 6 h
 
 
 def api_key() -> str:
@@ -61,12 +61,20 @@ def usage(db: Session, now: datetime | None = None) -> dict:
     return {"day": day, "month": month, "today": u.get("days", {}).get(day, 0), "this_month": u.get("months", {}).get(month, 0)}
 
 
+def paced_allowance(d_cap: int, now: datetime) -> int:
+    """Spread the daily credits over the day: by hour h at most ceil(cap * (h + 3) / 24) may be used."""
+    import math
+    hours = now.hour + now.minute / 60
+    return min(d_cap, math.ceil(d_cap * (hours + 3) / 24))
+
+
 def can_spend(db: Session, n: int = 1, now: datetime | None = None) -> bool:
     if not api_key():
         return False
+    now = now or utcnow()
     u = usage(db, now)
     d, m = caps()
-    return u["today"] + n <= d and u["this_month"] + n <= m
+    return u["today"] + n <= paced_allowance(d, now) and u["this_month"] + n <= m
 
 
 def _record(db: Session, now: datetime) -> None:
@@ -122,7 +130,7 @@ def find_fixture(fixtures: list[dict], p1: str, p2: str, start: datetime) -> tup
 
 
 def fixtures(db: Session, need_start: datetime, now: datetime | None = None) -> list[dict]:
-    """Cached TT Elite fixture list; refreshed (1 credit) only if stale and it doesn't cover `need_start`."""
+    """Cached TT Elite fixture list; refreshed (1 credit) only when called after a cache miss, at most every 6 h."""
     now = now or utcnow()
     cache = _get_row(db, "oddspapi_fixtures")
     fx = cache.get("fixtures", [])
@@ -178,8 +186,10 @@ def market_check(db: Session, p1_name: str, p2_name: str, start: datetime, now: 
     now = now or utcnow()
     if not api_key() or as_utc(start) <= now + timedelta(minutes=2):
         return None
-    fx = fixtures(db, start, now)
-    hit = find_fixture(fx, p1_name, p2_name, start)
+    cached = _get_row(db, "oddspapi_fixtures").get("fixtures", [])
+    hit = find_fixture(cached, p1_name, p2_name, start)
+    if not hit:                                    # only a miss can cost a list request
+        hit = find_fixture(fixtures(db, start, now), p1_name, p2_name, start)
     if not hit or not can_spend(db, 1, now):
         return {"status": "no_fixture" if not hit else "no_budget"}
     f, flipped = hit
