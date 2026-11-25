@@ -33,7 +33,7 @@ BASE = "https://api.oddspapi.io/v4"
 TT_ELITE_TOURNAMENT = 36377
 WINNER = "251"
 HARD_ROCK = "hardrockbet"
-FIXTURE_REFRESH = timedelta(hours=6)   # the TT Elite list (2 days ahead) is re-read only on a miss, at most every 6 h
+FIXTURE_REFRESH = timedelta(hours=24)  # the TT Elite list (2 days ahead) is re-read at most once a day
 
 
 def api_key() -> str:
@@ -226,11 +226,28 @@ def board_by_fixture(db: Session, fixture_id: str, flipped: bool, now: datetime 
 
 # ------------------------------------------------------------------ bulk sweeps (all matches, one book per credit)
 def ref_books() -> list[str]:
-    return [b.strip() for b in os.environ.get("ODDSPAPI_REF_BOOKS", "draftkings,bet365").split(",") if b.strip()]
+    return [b.strip() for b in os.environ.get("ODDSPAPI_REF_BOOKS", "draftkings").split(",") if b.strip()]
 
 
 def sweep_minutes() -> int:
-    return int(os.environ.get("ODDSPAPI_SWEEP_MINUTES", "180"))
+    return int(os.environ.get("ODDSPAPI_SWEEP_MINUTES", "420"))
+
+
+def sweep_fresh_minutes() -> int:
+    return sweep_minutes() + 15
+
+
+def sweep_status(db: Session, now: datetime | None = None) -> dict:
+    """Short summary for the run log: when the last sweep ran, how many matches each book priced, credits used."""
+    now = now or utcnow()
+    sw = latest_sweep(db)
+    per_book: dict[str, int] = {}
+    for b in sw.get("boards", {}).values():
+        for slug in b.get("books", {}):
+            per_book[slug] = per_book.get(slug, 0) + 1
+    age = round((now - datetime.fromisoformat(sw["fetched_at"])).total_seconds() / 60) if sw.get("fetched_at") else None
+    return {"last_sweep_min_ago": age, "matches": len(sw.get("boards", {})), "priced_by": per_book,
+            "usage": usage(db, now)}
 
 
 def fair_p1(pairs: dict[str, tuple[float, float]], books: list[str]) -> tuple[float | None, int]:
@@ -283,9 +300,11 @@ def sweep(db: Session, now: datetime | None = None, force: bool = False) -> dict
 
 
 def from_sweep(db: Session, p1_name: str, p2_name: str, start: datetime, now: datetime | None = None,
-               max_age_min: int = 60) -> dict | None:
-    """Market data for one match from the latest sweep (no credits). None if no fresh sweep has it."""
+               max_age_min: int | None = None) -> dict | None:
+    """Market data for one match from the latest sweep (no credits). A sweep stays usable until the next one is due
+    (every pick still says "bet only if Hard Rock >= X", so a moved price is caught when you place it)."""
     now = now or utcnow()
+    max_age_min = max_age_min or sweep_fresh_minutes()
     sw = latest_sweep(db)
     if not sw.get("fetched_at") or now - datetime.fromisoformat(sw["fetched_at"]) > timedelta(minutes=max_age_min):
         return {"status": "no fresh sweep"}

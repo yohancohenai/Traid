@@ -343,7 +343,7 @@ SWEEP_WINDOW_MIN = 90     # after a sweep, every match starting in the next 90 m
 
 
 def picks_job(db: Session) -> dict:
-    from ttq.providers.oddspapi import from_sweep, latest_sweep, sweep
+    from ttq.providers.oddspapi import from_sweep, latest_sweep, sweep, sweep_fresh_minutes
     from ttq.services.alerts import raise_alert
     from ttq.services.messages import conditional_pick_text
     from ttq.services.summary import log_picks
@@ -353,7 +353,7 @@ def picks_job(db: Session) -> dict:
     except Exception as e:  # noqa
         swept = {"swept": False, "why": f"error {e.__class__.__name__}"}
     sw = latest_sweep(db)
-    fresh = bool(sw.get("fetched_at")) and (utcnow() - datetime.fromisoformat(sw["fetched_at"])).total_seconds() < 3600
+    fresh = bool(sw.get("fetched_at")) and (utcnow() - datetime.fromisoformat(sw["fetched_at"])).total_seconds() < 60 * sweep_fresh_minutes()
     if not fresh:                     # no live market data: nothing can be confirmed, so nothing is sent
         return {"sent": 0, "picks": [], "skipped_by_market": [], "checked": {"no_fresh_sweep": True}, "sweep": swept}
     for pk in build_picks(db, stats=stats, max_minutes=SWEEP_WINDOW_MIN):

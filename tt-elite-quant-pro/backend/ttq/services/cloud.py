@@ -80,4 +80,9 @@ def cloud_cycle(window_minutes: int = 35, min_minutes: int = 10, hold_minutes: f
         r = jobs.run_job("picks", picks)
         released += (r or {}).get("sent", 0) if isinstance(r, dict) else 0
     out["released_while_waiting"] = released
+
+    def market(db):
+        from ttq.providers.oddspapi import sweep_status
+        return sweep_status(db)
+    out["market"] = jobs.run_job("market_status", market)
     return out

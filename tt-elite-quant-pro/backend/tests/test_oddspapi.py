@@ -177,6 +177,7 @@ def test_cached_fixture_list_costs_nothing(db, monkeypatch):
 
 def test_bulk_sweep_covers_all_matches_for_three_credits(db, monkeypatch):
     monkeypatch.setenv("ODDSPAPI_KEY", "k")
+    monkeypatch.setenv("ODDSPAPI_REF_BOOKS", "draftkings,bet365")
     monkeypatch.setattr(op, "paced_allowance", lambda cap, now: cap)
     monkeypatch.setattr("time.sleep", lambda s: None)
     st = (utcnow() + timedelta(minutes=40)).isoformat()
@@ -211,3 +212,16 @@ def test_sweep_waits_for_budget(db, monkeypatch):
     monkeypatch.setattr(op, "paced_allowance", lambda cap, now: 2)
     monkeypatch.setattr(op.httpx, "get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no call")))
     assert op.sweep(db)["why"].startswith("budget")
+
+
+def test_sweep_stays_usable_until_next_one_and_status(db, monkeypatch):
+    monkeypatch.setenv("ODDSPAPI_SWEEP_MINUTES", "420")
+    now = utcnow()
+    op._put_row(db, "oddspapi_sweep", {"fetched_at": (now - timedelta(hours=5)).isoformat(), "books": [],
+                                       "boards": {"f1": {"start": now.isoformat(), "p1": "A B", "p2": "C D",
+                                                         "books": {"hardrockbet": [1.8, 2.0], "draftkings": [1.7, 2.1]}}}})
+    assert op.from_sweep(db, "A B", "C D", now)["status"] == "ok"           # 5 h old, next sweep not due yet
+    op._put_row(db, "oddspapi_sweep", {**op.latest_sweep(db), "fetched_at": (now - timedelta(hours=8)).isoformat()})
+    assert op.from_sweep(db, "A B", "C D", now)["status"] == "no fresh sweep"
+    st = op.sweep_status(db, now)
+    assert st["matches"] == 1 and st["priced_by"] == {"hardrockbet": 1, "draftkings": 1} and st["last_sweep_min_ago"] == 480
