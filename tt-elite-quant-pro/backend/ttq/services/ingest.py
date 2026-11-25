@@ -137,7 +137,9 @@ def ingest_results(db: Session, provider: ResultsProvider, since: datetime, unti
         log.exception("results ingest failed", extra={"provider": provider.key})
         return {"status": "ERROR", "error": str(e)}
     save_raw(db, provider.key, f"matches?since={since.isoformat()}&until={until.isoformat()}",
-             {"summary": raw, "matches": [pm.__dict__ for pm in matches]} if len(matches) < 2000 else {"summary": raw},
+             # live feeds run every ~10 min: keep only the summary (full match lists grew the database ~40 MB/day)
+             {"summary": raw, "matches": [pm.__dict__ for pm in matches]} if provider.is_demo and len(matches) < 2000
+             else {"summary": raw, "n": len(matches)},
              provider.is_demo)
     counts: dict[str, int] = {}
     for pm in matches:

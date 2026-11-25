@@ -64,8 +64,8 @@ def cloud_cycle(window_minutes: int = 35, min_minutes: int = 10, hold_minutes: f
     out["picks"] = jobs.run_job("picks", picks)
 
     def learn(db):
-        from ttq.services.learning import daily_self_check
-        return daily_self_check(db)
+        from ttq.services.learning import daily_self_check, prune_if_due
+        return {**daily_self_check(db), "housekeeping": prune_if_due(db)}
     out["self_check"] = jobs.run_job("self_check", learn)
 
     def weekly(db):

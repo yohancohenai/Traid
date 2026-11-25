@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from ttq.core.config import get_settings
 from ttq.core.timeutil import as_utc, utcnow
-from ttq.models import AppSetting, Bet, Match, Prediction, Recommendation
+from ttq.models import AppSetting, Bet, Match, OddsQuote, Prediction, RawObservation, Recommendation
 from ttq.services.app_settings import get_setting, set_setting
 
 log = logging.getLogger(__name__)
@@ -87,7 +87,10 @@ def prune(db: Session, keep_days: int = 2) -> dict:
         Prediction.is_backtest.is_(False), Prediction.created_at < cutoff,
         ~exists().where(and_(latest.c.match_id == Prediction.match_id, latest.c.mx == Prediction.as_of)),
         ~exists().where(Recommendation.prediction_id == Prediction.id)).execution_options(synchronize_session=False))
-    return {"recommendations_deleted": r.rowcount, "predictions_deleted": p.rowcount}
+    raw = db.execute(delete(RawObservation).where(
+        RawObservation.fetched_at < cutoff,
+        ~exists().where(OddsQuote.raw_observation_id == RawObservation.id)).execution_options(synchronize_session=False))
+    return {"recommendations_deleted": r.rowcount, "predictions_deleted": p.rowcount, "raw_deleted": raw.rowcount}
 
 
 def daily_self_check(db: Session, now: datetime | None = None, force: bool = False) -> dict:
@@ -139,3 +142,18 @@ def daily_self_check(db: Session, now: datetime | None = None, force: bool = Fal
             db.add(AppSetting(key=key, value=val))
     db.flush()
     return {"ran": True, **entry}
+
+
+def prune_if_due(db: Session, hours: int = 6) -> dict:
+    """Housekeeping every few hours (the database is saved and restored on every bot run, so it must stay small)."""
+    now = utcnow()
+    row = db.get(AppSetting, "prune_last")
+    if row and now - datetime.fromisoformat(row.value["at"]) < timedelta(hours=hours):
+        return {"ran": False}
+    out = prune(db)
+    if row:
+        row.value = {"at": now.isoformat()}
+    else:
+        db.add(AppSetting(key="prune_last", value={"at": now.isoformat()}))
+    db.flush()
+    return {"ran": True, **out}
