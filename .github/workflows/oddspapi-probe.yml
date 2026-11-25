@@ -1,0 +1,22 @@
+# One-off check of OddsPapi coverage for TT Elite (uses ~6 credits). Started by updating .github/probe-oddspapi.
+name: OddsPapi probe
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths: [".github/probe-oddspapi"]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/tt-elite-quant-pro-6b6pj7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q requests && python tt-elite-quant-pro/backend/scripts/oddspapi_probe.py
+        env:
+          ODDSPAPI_KEY: ${{ secrets.ODDSPAPI_KEY }}
