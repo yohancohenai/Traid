@@ -42,6 +42,9 @@ jobs:
       TTQ_TELEGRAM_CHAT_ID: ${{ secrets.TTQ_TELEGRAM_CHAT_ID }}
       TTQ_JWT_SECRET: not-used-in-bot-mode
       TTQ_DASH_PASSWORD: ${{ secrets.TTQ_DASH_PASSWORD }}
+      ODDSPAPI_KEY: ${{ secrets.ODDSPAPI_KEY }}          # Hard Rock + market prices (credits capped in code)
+      ODDSPAPI_DAILY_CAP: "7"
+      ODDSPAPI_MONTHLY_CAP: "240"
     steps:
       - uses: actions/checkout@v4
         with:
