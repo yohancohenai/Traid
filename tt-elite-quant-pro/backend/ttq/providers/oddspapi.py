@@ -1,4 +1,9 @@
-"""OddsPapi market check for TT Elite picks: Hard Rock's real price + a consensus fair price from all books.
+"""OddsPapi market data for TT Elite picks: Hard Rock's real price + a fair price from reference books.
+
+Main mode: BULK SWEEPS. /v4/odds-by-tournaments returns every upcoming TT Elite match for ONE bookmaker in ONE
+request. A sweep = Hard Rock + the reference books (default DraftKings, bet365) = 3 credits, covering every match on
+the board. TT Elite boards fill in the last ~hour before each match, so each sweep covers the matches starting
+soon; how often sweeps run sets the coverage (env ODDSPAPI_SWEEP_MINUTES).
 
 Credits are scarce (free plan: 250 requests/month), so every request is counted, including failed ones:
   - at most `daily_cap` requests per UTC day and `monthly_cap` per month (stored in app_settings["oddspapi_usage"]);
@@ -217,3 +222,84 @@ def board_by_fixture(db: Session, fixture_id: str, flipped: bool, now: datetime 
     if flipped:
         pairs = {k: (b, a) for k, (a, b) in pairs.items()}
     return {"status": "ok", "books": len(pairs), "hard_rock": pairs.get(HARD_ROCK), "consensus_p1": consensus_p1(pairs)}
+
+
+# ------------------------------------------------------------------ bulk sweeps (all matches, one book per credit)
+def ref_books() -> list[str]:
+    return [b.strip() for b in os.environ.get("ODDSPAPI_REF_BOOKS", "draftkings,bet365").split(",") if b.strip()]
+
+
+def sweep_minutes() -> int:
+    return int(os.environ.get("ODDSPAPI_SWEEP_MINUTES", "180"))
+
+
+def fair_p1(pairs: dict[str, tuple[float, float]], books: list[str]) -> tuple[float | None, int]:
+    """Median no-vig chance for participant 1 across the reference books that price the match."""
+    vals = [(1 / a) / (1 / a + 1 / b) for slug, (a, b) in pairs.items() if slug in books]
+    return (statistics.median(vals), len(vals)) if vals else (None, 0)
+
+
+def latest_sweep(db: Session) -> dict:
+    return _get_row(db, "oddspapi_sweep")
+
+
+def sweep(db: Session, now: datetime | None = None, force: bool = False) -> dict:
+    """Run one bulk sweep if it's due, matches are coming up, and the budget allows. Stores all boards."""
+    import time
+    now = now or utcnow()
+    if not api_key():
+        return {"swept": False, "why": "no key"}
+    last = latest_sweep(db)
+    if not force and last.get("fetched_at") and \
+            now - datetime.fromisoformat(last["fetched_at"]) < timedelta(minutes=sweep_minutes()):
+        return {"swept": False, "why": "not due"}
+    books = [HARD_ROCK] + ref_books()
+    cache = _get_row(db, "oddspapi_fixtures")
+    fx_fresh = cache.get("fetched_at") and now - datetime.fromisoformat(cache["fetched_at"]) < FIXTURE_REFRESH
+    cost = len(books) + (0 if fx_fresh else 1)
+    if not can_spend(db, cost, now):
+        return {"swept": False, "why": f"budget (needs {cost})"}
+    names = {f["fixtureId"]: f for f in fixtures(db, now + timedelta(hours=2), now)} if not fx_fresh else \
+        {f["fixtureId"]: f for f in cache.get("fixtures", [])}
+    boards: dict[str, dict] = {}
+    for i, slug in enumerate(books):
+        if i:
+            time.sleep(1.2)                       # endpoint rate limit: 1 call per second
+        data = _request(db, "odds-by-tournaments", now, tournamentIds=str(TT_ELITE_TOURNAMENT), bookmaker=slug)
+        for f in data or []:
+            if f.get("statusId", 0) != 0:          # only matches that haven't started
+                continue
+            fid = f["fixtureId"]
+            pr = winner_pairs({"bookmakerOdds": {slug: (f.get("bookmakerOdds") or {}).get(slug, {})}}).get(slug)
+            if not pr:
+                continue
+            meta = names.get(fid, {})
+            b = boards.setdefault(fid, {"start": f.get("startTime"), "p1": meta.get("participant1Name", ""),
+                                        "p2": meta.get("participant2Name", ""), "books": {}})
+            b["books"][slug] = list(pr)
+    _put_row(db, "oddspapi_sweep", {"fetched_at": now.isoformat(), "boards": boards, "books": books})
+    with_hr = sum(1 for b in boards.values() if HARD_ROCK in b["books"])
+    return {"swept": True, "matches": len(boards), "with_hard_rock": with_hr, "credits": cost}
+
+
+def from_sweep(db: Session, p1_name: str, p2_name: str, start: datetime, now: datetime | None = None,
+               max_age_min: int = 60) -> dict | None:
+    """Market data for one match from the latest sweep (no credits). None if no fresh sweep has it."""
+    now = now or utcnow()
+    sw = latest_sweep(db)
+    if not sw.get("fetched_at") or now - datetime.fromisoformat(sw["fetched_at"]) > timedelta(minutes=max_age_min):
+        return {"status": "no fresh sweep"}
+    rows = [{"fixtureId": fid, "startTime": b["start"], "participant1Name": b["p1"], "participant2Name": b["p2"]}
+            for fid, b in sw.get("boards", {}).items() if b.get("start")]
+    hit = find_fixture(rows, p1_name, p2_name, start)
+    if not hit:
+        return {"status": "not in sweep"}
+    f, flipped = hit
+    pairs = {k: tuple(v) for k, v in sw["boards"][f["fixtureId"]]["books"].items()}
+    if flipped:
+        pairs = {k: (b, a) for k, (a, b) in pairs.items()}
+    fair, n = fair_p1(pairs, ref_books())
+    return {"status": "ok", "books": n, "hard_rock": pairs.get(HARD_ROCK), "consensus_p1": fair,
+            "fixture_id": f["fixtureId"], "flipped": flipped, "swept_at": sw["fetched_at"],
+            "refs": {k: v for k, v in pairs.items() if k != HARD_ROCK}}
+

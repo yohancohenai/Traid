@@ -126,6 +126,7 @@ def test_closing_line_records_clv(f, db, monkeypatch):
     from ttq.services.summary import log_picks
     from ttq.services.targets import closing_lines
     monkeypatch.setenv("ODDSPAPI_KEY", "k")
+    monkeypatch.setenv("ODDSPAPI_CLOSING", "1")
     a, b = f.player(), f.player()
     m = f.match(a, b, at=utcnow() + timedelta(minutes=4))
     log_picks(db, [{"match_id": m.id, "side": "p1", "p": 0.62, "min_american": -135, "fixture_id": "x9",
@@ -171,3 +172,42 @@ def test_cached_fixture_list_costs_nothing(db, monkeypatch):
     monkeypatch.setattr(op, "paced_allowance", lambda cap, now: cap)
     op.market_check(db, "Marian Brunner", "Dawid Pyrek", st)
     assert len(urls) == 1 and urls[0].endswith("/odds")          # no list refresh on a cache hit
+
+
+
+def test_bulk_sweep_covers_all_matches_for_three_credits(db, monkeypatch):
+    monkeypatch.setenv("ODDSPAPI_KEY", "k")
+    monkeypatch.setattr(op, "paced_allowance", lambda cap, now: cap)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    st = (utcnow() + timedelta(minutes=40)).isoformat()
+    fixtures = [{"fixtureId": f"f{i}", "startTime": st, "participant1Name": f"Surname{i}, First{i}",
+                 "participant2Name": f"Other{i}, Name{i}", "statusName": "Pre-Game"} for i in range(5)]
+    prices = {"hardrockbet": (1.80, 2.00), "draftkings": (1.70, 2.15), "bet365": (1.72, 2.10)}
+    calls = []
+    class R:
+        def __init__(self, d): self.d, self.status_code = d, 200
+        def json(self): return self.d
+    def get(url, params=None, **k):
+        calls.append(url.rsplit("/", 1)[1])
+        if url.endswith("/fixtures"):
+            return R(fixtures)
+        slug = params["bookmaker"]
+        return R([{"fixtureId": f"f{i}", "startTime": st, "statusId": 0,
+                   "bookmakerOdds": {slug: _book(*prices[slug])}} for i in range(5)])
+    monkeypatch.setattr(op.httpx, "get", get)
+    r = op.sweep(db)
+    assert r["swept"] and r["matches"] == 5 and r["with_hard_rock"] == 5 and r["credits"] == 4   # list + 3 books
+    assert calls.count("odds-by-tournaments") == 3 and op.usage(db)["today"] == 4
+    assert op.sweep(db)["why"] == "not due"                                  # no double spending
+    mk = op.from_sweep(db, "First3 Surname3", "Name3 Other3", utcnow() + timedelta(minutes=40))
+    assert mk["status"] == "ok" and mk["hard_rock"] == (1.80, 2.00) and mk["books"] == 2
+    assert 0.55 < mk["consensus_p1"] < 0.57
+    flipped = op.from_sweep(db, "Name3 Other3", "First3 Surname3", utcnow() + timedelta(minutes=40))
+    assert flipped["hard_rock"] == (2.00, 1.80)
+
+
+def test_sweep_waits_for_budget(db, monkeypatch):
+    monkeypatch.setenv("ODDSPAPI_KEY", "k")
+    monkeypatch.setattr(op, "paced_allowance", lambda cap, now: 2)
+    monkeypatch.setattr(op.httpx, "get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no call")))
+    assert op.sweep(db)["why"].startswith("budget")

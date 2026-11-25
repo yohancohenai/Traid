@@ -113,7 +113,8 @@ def price_targets_job(db: Session) -> dict:
     return {"sent": len(d["match_ids"]), "channels": a.channels_sent if a else []}
 
 
-def build_picks(db: Session, now: datetime | None = None, stats: dict | None = None) -> list[dict]:
+def build_picks(db: Session, now: datetime | None = None, stats: dict | None = None,
+                max_minutes: int | None = None) -> list[dict]:
     """Strongest conditional picks for live matches starting soon. One side per match, each match once, capped per
     local day. Returns [{"match", "pred", "side", "p", "min_american"}]."""
     cfg = get_setting(db, "alerts")
@@ -121,7 +122,7 @@ def build_picks(db: Session, now: datetime | None = None, stats: dict | None = N
         return []
     now = now or utcnow()
     F = get_filters(db, False)
-    lo_min, hi_min = int(cfg.get("picks_min_minutes", 10)), int(cfg.get("picks_max_minutes", 45))
+    lo_min, hi_min = int(cfg.get("picks_min_minutes", 10)), int(max_minutes or cfg.get("picks_max_minutes", 45))
     max_width = float(cfg.get("picks_max_interval", 0.20))
     # Back-test (Nov 2026, 1,338 out-of-sample matches): the model is well calibrated for favourites at 60%+ but
     # over-confident on near coin-flips, and the HIGH-quality / narrow-range / models-agree filters did not raise the
@@ -286,8 +287,11 @@ def suggested_units(db: Session, edge_vs_market: float | None, dec: float | None
 
 def closing_lines(db: Session, now: datetime | None = None) -> dict:
     """Closing price for sent picks, read 1-8 minutes before start (1 credit each, only with credits to spare)."""
+    import os
     from ttq.providers.oddspapi import board_by_fixture, caps, usage
     now = now or utcnow()
+    if os.environ.get("ODDSPAPI_CLOSING", "0") != "1":   # off on the free plan: sweeps need every credit
+        return {"closed": 0, "why": "closing reads off"}
     row = db.get(AppSetting, "picks_log")
     if not row:
         return {"closed": 0}
@@ -335,21 +339,29 @@ def _log_market_check(db: Session, row: dict) -> None:
     db.flush()
 
 
+SWEEP_WINDOW_MIN = 90     # after a sweep, every match starting in the next 90 min is evaluated at once
+
+
 def picks_job(db: Session) -> dict:
-    from ttq.providers.oddspapi import market_check
+    from ttq.providers.oddspapi import from_sweep, latest_sweep, sweep
     from ttq.services.alerts import raise_alert
     from ttq.services.messages import conditional_pick_text
     from ttq.services.summary import log_picks
     out, logged, stats, skipped = [], [], {}, []
-    for pk in build_picks(db, stats=stats):
+    try:
+        swept = sweep(db)
+    except Exception as e:  # noqa
+        swept = {"swept": False, "why": f"error {e.__class__.__name__}"}
+    sw = latest_sweep(db)
+    fresh = bool(sw.get("fetched_at")) and (utcnow() - datetime.fromisoformat(sw["fetched_at"])).total_seconds() < 3600
+    if not fresh:                     # no live market data: nothing can be confirmed, so nothing is sent
+        return {"sent": 0, "picks": [], "skipped_by_market": [], "checked": {"no_fresh_sweep": True}, "sweep": swept}
+    for pk in build_picks(db, stats=stats, max_minutes=SWEEP_WINDOW_MIN):
         m = pk["match"]
-        if pk["p"] > MAX_FAV_TO_CHECK:
-            mk = {"status": "skipped: favourite too short to land in -200..+200"}
-        else:
-            try:
-                mk = market_check(db, m.player1.canonical_name, m.player2.canonical_name, m.scheduled_at)
-            except Exception:  # noqa
-                mk = {"status": "error"}
+        try:
+            mk = from_sweep(db, m.player1.canonical_name, m.player2.canonical_name, m.scheduled_at)
+        except Exception:  # noqa
+            mk = {"status": "error"}
         send, info = decide_with_market(pk["side"], pk["p"], pk["min_american"], mk, pk["pred"], get_filters(db, False))
         if send and info.get("side") and info["side"] != pk["side"]:      # the market made the other side the play
             pk = {**pk, "side": info["side"], "p": info["p"]}
@@ -379,4 +391,5 @@ def picks_job(db: Session) -> dict:
         closes = closing_lines(db)
     except Exception:  # noqa
         closes = {"closed": "error"}
-    return {"sent": len(out), "picks": out, "skipped_by_market": skipped, "checked": stats, "closing": closes}
+    return {"sent": len(out), "picks": out, "skipped_by_market": skipped, "checked": stats, "closing": closes,
+            "sweep": swept}

@@ -16,6 +16,14 @@ def _m(f, db, minutes=30, p1=0.66, width=0.08, dq="HIGH", demo=False, names=None
     return m
 
 
+def _market(monkeypatch, result):
+    """Fresh bulk sweep with `result` as the market data for every match."""
+    from ttq.core.timeutil import utcnow as _now
+    monkeypatch.setattr("ttq.providers.oddspapi.sweep", lambda *a, **k: {"swept": False, "why": "test"})
+    monkeypatch.setattr("ttq.providers.oddspapi.latest_sweep", lambda db: {"fetched_at": _now().isoformat()})
+    monkeypatch.setattr("ttq.providers.oddspapi.from_sweep", lambda *a, **k: result)
+
+
 def _setup(db):
     set_setting(db, "filters", {"min_player_matches": 0})
 
@@ -89,8 +97,7 @@ def test_job_sends_every_pick(f, db, monkeypatch):
     monkeypatch.setattr("ttq.services.alerts._send_telegram", lambda t, b: sent.append(t) or True)
     monkeypatch.setattr("ttq.services.alerts._send_email", lambda t, b: False)
     # Hard Rock pays +105 on a 66% favourite while the other books price it ~60%: a misplaced line
-    monkeypatch.setattr("ttq.providers.oddspapi.market_check",
-                        lambda *a, **k: {"status": "ok", "books": 30, "hard_rock": (1.70, 2.20), "consensus_p1": 0.62})
+    _market(monkeypatch, {"status": "ok", "books": 2, "hard_rock": (1.70, 2.20), "consensus_p1": 0.62})
     r = picks_job(db)
     assert r["sent"] == 3 and len(sent) == 3
     assert db.query(Alert).filter_by(kind="pick").count() == 3
@@ -99,7 +106,7 @@ def test_job_sends_every_pick(f, db, monkeypatch):
 def test_no_market_data_means_no_pick(f, db, monkeypatch):
     _setup(db)
     _m(f, db, 30)
-    monkeypatch.setattr("ttq.providers.oddspapi.market_check", lambda *a, **k: {"status": "no_budget"})
+    _market(monkeypatch, {"status": "not in sweep"})
     r = picks_job(db)
     assert r["sent"] == 0 and "no live market data" in r["skipped_by_market"][0]["reason"]
 
@@ -148,11 +155,20 @@ def test_message_shows_real_hard_rock_and_market(f, db):
 def test_market_rejection_is_not_sent_but_logged(f, db, monkeypatch):
     _setup(db)
     _m(f, db, 30)
-    monkeypatch.setattr("ttq.providers.oddspapi.market_check",
-                        lambda *a, **k: {"status": "ok", "books": 30, "hard_rock": (1.3, 3.5), "consensus_p1": 0.66})
+    _market(monkeypatch, {"status": "ok", "books": 2, "hard_rock": (1.3, 3.5), "consensus_p1": 0.66})
     sent = []
     monkeypatch.setattr("ttq.services.alerts._send_telegram", lambda t, b: sent.append(t) or True)
     r = picks_job(db)
     assert r["sent"] == 0 and len(r["skipped_by_market"]) == 1 and not sent
     from ttq.models import AppSetting
     assert db.get(AppSetting, "market_checks").value["items"][-1]["sent"] is False
+
+
+
+def test_nothing_sent_without_a_fresh_sweep(f, db, monkeypatch):
+    _setup(db)
+    _m(f, db, 30)
+    monkeypatch.setattr("ttq.providers.oddspapi.sweep", lambda *a, **k: {"swept": False, "why": "budget"})
+    monkeypatch.setattr("ttq.providers.oddspapi.latest_sweep", lambda db: {})
+    r = picks_job(db)
+    assert r["sent"] == 0 and r["checked"] == {"no_fresh_sweep": True}
