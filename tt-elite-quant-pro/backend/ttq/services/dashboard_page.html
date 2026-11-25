@@ -202,7 +202,7 @@ function render(d) {
       <th class="r">Minimum</th><th class="r">Hard Rock</th><th>Score</th><th>Result</th><th class="r">Units</th></tr></thead><tbody>
       ${d.picks.map(p => `<tr><td>${esc(p.match_time)}</td><td><b>${esc(p.pick)}</b></td><td class="muted">${esc(p.match)}</td>
         <td class="r num">${pct(p.prob)}</td><td class="r num">${am(p.min)}</td>
-        <td class="r num">${p.hr_action ? (p.hr_action === "skip" ? "skipped" : am(p.hr_price) + (p.hr_action === "bet" ? " · bet" : "")) : "–"}</td>
+        <td class="r num">${p.hr_action ? (p.hr_action === "skip" ? "skipped" : am(p.hr_price) + (p.hr_action === "bet" ? " · bet" : "")) : (p.hr_auto != null ? am(p.hr_auto) + " · live" : "–")}</td>
         <td class="num">${esc(p.score || "–")}</td>
         <td><span class="chip ${p.result === "won" ? "won" : p.result === "lost" ? "lost" : ""}">${p.result === "won" ? "✓ " : p.result === "lost" ? "✕ " : ""}${esc(p.result)}</span></td>
         <td class="r num ${cls(p.units)}">${p.units == null ? "–" : sgn(p.units)}</td></tr>`).join("")}</tbody></table></div>`
@@ -224,7 +224,17 @@ function render(d) {
       </tbody></table></div>
       ${L.history.length > 1 ? `<div class="muted" style="font-size:12px">${L.history.slice(1).map(h => `${esc(h.date)}: ${esc(h.note)}`).join("<br>")}</div>` : ""}
     </div>` : `<div class="empty">The first daily check runs today; it compares the model's predictions with real results.</div>`}</section>`;
-  $("#app").innerHTML = `${head}<main>${kpis}${chart}${statsCard}${learnCard}
+  const M = d.market || {usage: {}, checks: []}, U = M.usage;
+  const mkCard = `<section class="card"><h3>Hard Rock market checks <span>OddsPapi credits: ${U.this_month ?? 0} of ${U.monthly_cap ?? "–"} this month · ${U.today ?? 0} of ${U.daily_cap ?? "–"} today</span></h3>
+    ${M.checks.length ? `<div class="scroll"><table><thead><tr><th>Checked</th><th>Pick</th><th class="r">Model</th><th class="r">Minimum</th>
+      <th class="r">Hard Rock</th><th class="r">Market fair</th><th class="r">Edge vs market</th><th>Decision</th></tr></thead><tbody>
+      ${M.checks.map(c => `<tr><td class="muted">${esc((c.at || "").slice(11, 16))} UTC</td><td><b>${esc(c.pick)}</b> <span class="muted">${esc(c.match)}</span></td>
+        <td class="r num">${pct(c.p)}</td><td class="r num">${am(c.min_american)}</td><td class="r num">${am(c.hr_american)}</td>
+        <td class="r num">${c.consensus_p ? pct(c.consensus_p, 1) + (c.books ? ` · ${c.books} books` : "") : "–"}</td>
+        <td class="r num ${cls(c.market_ev_at_hr)}">${c.market_ev_at_hr == null ? "–" : sgn(c.market_ev_at_hr * 100, 1) + "%"}</td>
+        <td><span class="chip ${c.sent ? "pass" : ""}">${c.sent ? "sent" : "skipped"}</span> <span class="muted">${esc(c.reason || c.market || "")}</span></td></tr>`).join("")}
+      </tbody></table></div>` : `<div class="empty">No market checks yet. Each pick candidate is checked against Hard Rock's live price.</div>`}</section>`;
+  $("#app").innerHTML = `${head}<main>${kpis}${chart}${statsCard}${mkCard}${learnCard}
     <section class="card"><h3>Picks sent <span>${s.total} total</span></h3>${picks}</section>
     <section class="card"><h3>Next 3 hours <span>${d.upcoming_passing || 0} passing the rules right now</span></h3>${up}</section>
     <div class="foot">Picks are graded at the minimum price in each Telegram message, 1 unit each; a better Hard Rock price only improves this.

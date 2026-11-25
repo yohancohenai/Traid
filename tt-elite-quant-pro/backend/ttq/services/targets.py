@@ -196,22 +196,76 @@ def build_picks(db: Session, now: datetime | None = None, stats: dict | None = N
     return picks
 
 
+MARKET_DISAGREE = -0.03   # skip if, at Hard Rock's price, the consensus of other books says EV is below -3%
+
+
+def decide_with_market(side: str, p: float, min_american: int, mk: dict | None) -> tuple[bool, dict]:
+    """Use the live market (if we have it) to confirm or reject a model pick. Returns (send, info)."""
+    info: dict = {"market": (mk or {}).get("status", "not checked")}
+    if not mk or mk.get("status") != "ok":
+        return True, info
+    info["books"] = mk.get("books")
+    cons_p1 = mk.get("consensus_p1")
+    cons = None if cons_p1 is None else (cons_p1 if side == "p1" else 1 - cons_p1)
+    info["consensus_p"] = round(cons, 4) if cons is not None else None
+    hr = mk.get("hard_rock")
+    if not hr:
+        info["reason"] = "Hard Rock not pricing it"
+        return True, info
+    hr_dec = hr[0] if side == "p1" else hr[1]
+    from ttq.odds.math import decimal_to_american
+    info["hr_american"] = decimal_to_american(hr_dec)
+    info["hr_decimal"] = round(hr_dec, 3)
+    info["model_ev_at_hr"] = round(p * hr_dec - 1, 4)
+    info["market_ev_at_hr"] = round(cons * hr_dec - 1, 4) if cons is not None else None
+    if hr_dec < american_to_decimal(min_american) - 1e-9:
+        info["reason"] = f"Hard Rock {info['hr_american']:+d} is below the minimum {min_american:+d}"
+        return False, info
+    if info["market_ev_at_hr"] is not None and info["market_ev_at_hr"] < MARKET_DISAGREE:
+        info["reason"] = f"other books disagree (market EV {info['market_ev_at_hr']:+.1%} at Hard Rock's price)"
+        return False, info
+    info["reason"] = "Hard Rock price passes"
+    return True, info
+
+
+def _log_market_check(db: Session, row: dict) -> None:
+    r = db.get(AppSetting, "market_checks")
+    items = (list(r.value.get("items", [])) if r else [])[-299:] + [row]
+    if r:
+        r.value = {"items": items}
+    else:
+        db.add(AppSetting(key="market_checks", value={"items": items}))
+    db.flush()
+
+
 def picks_job(db: Session) -> dict:
+    from ttq.providers.oddspapi import market_check
     from ttq.services.alerts import raise_alert
     from ttq.services.messages import conditional_pick_text
     from ttq.services.summary import log_picks
-    out, logged, stats = [], [], {}
+    out, logged, stats, skipped = [], [], {}, []
     for pk in build_picks(db, stats=stats):
         m = pk["match"]
-        title, body = conditional_pick_text(db, m, pk["pred"], pk["side"], pk["p"], pk["min_american"])
+        try:
+            mk = market_check(db, m.player1.canonical_name, m.player2.canonical_name, m.scheduled_at)
+        except Exception:  # noqa
+            mk = {"status": "error"}
+        send, info = decide_with_market(pk["side"], pk["p"], pk["min_american"], mk)
+        name = m.player1.canonical_name if pk["side"] == "p1" else m.player2.canonical_name
+        _log_market_check(db, {"at": utcnow().isoformat(), "match_id": m.id, "match": f"{m.player1.canonical_name} vs "
+                               f"{m.player2.canonical_name}", "pick": name, "p": round(pk["p"], 4),
+                               "min_american": pk["min_american"], "sent": send, **info})
+        if not send:
+            skipped.append({"match_id": m.id, "reason": info.get("reason")})
+            continue
+        title, body = conditional_pick_text(db, m, pk["pred"], pk["side"], pk["p"], pk["min_american"], info)
         a = raise_alert(db, "pick", title, body, f"pick:{m.id}", "INFO", False, rate_limited=False)
-        out.append({"match_id": m.id, "side": pk["side"], "min": pk["min_american"], "channels": a.channels_sent if a else []})
+        out.append({"match_id": m.id, "side": pk["side"], "min": pk["min_american"], "market": info.get("market"),
+                    "channels": a.channels_sent if a else []})
         logged.append({"match_id": m.id, "side": pk["side"], "p": round(pk["p"], 4), "min_american": pk["min_american"],
-                       "tg_msg": getattr(a, "telegram_message_id", None) if a else None,
-                       "pick_name": m.player1.canonical_name if pk["side"] == "p1" else m.player2.canonical_name})
+                       "tg_msg": getattr(a, "telegram_message_id", None) if a else None, "pick_name": name,
+                       "hr_auto": info.get("hr_american"), "consensus_p": info.get("consensus_p"),
+                       "books": info.get("books")})
     if logged:
         log_picks(db, logged)
-    if "widths" in stats:
-        w = sorted(stats.pop("widths"))
-        stats["too_uncertain_widths"] = {"min": w[0], "median": w[len(w) // 2], "max": w[-1]}
-    return {"sent": len(out), "picks": out, "checked": stats}
+    return {"sent": len(out), "picks": out, "skipped_by_market": skipped, "checked": stats}

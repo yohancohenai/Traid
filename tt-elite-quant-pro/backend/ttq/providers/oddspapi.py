@@ -1,0 +1,194 @@
+"""OddsPapi market check for TT Elite picks: Hard Rock's real price + a consensus fair price from all books.
+
+Credits are scarce (free plan: 250 requests/month), so every request is counted, including failed ones:
+  - at most `daily_cap` requests per UTC day and `monthly_cap` per month (stored in app_settings["oddspapi_usage"]);
+  - the fixture list (1 request covers ~2 days of TT Elite) is refreshed only when a pick needs it, at most every
+    3 hours;
+  - one odds request per pick candidate, only before the match starts (the free plan has no live odds), and each
+    match is checked once.
+Without a key, or with the budget spent, everything returns None and picks go out as before (minimum price only).
+"""
+from __future__ import annotations
+
+import logging
+import os
+import statistics
+from datetime import datetime, timedelta
+
+import httpx
+from sqlalchemy.orm import Session
+
+from ttq.core.timeutil import as_utc, utcnow
+from ttq.identity.names import strip_diacritics
+from ttq.models import AppSetting
+
+log = logging.getLogger(__name__)
+
+BASE = "https://api.oddspapi.io/v4"
+TT_ELITE_TOURNAMENT = 36377
+WINNER = "251"
+HARD_ROCK = "hardrockbet"
+FIXTURE_REFRESH = timedelta(hours=3)
+
+
+def api_key() -> str:
+    return os.environ.get("ODDSPAPI_KEY", "")
+
+
+def caps() -> tuple[int, int]:
+    return int(os.environ.get("ODDSPAPI_DAILY_CAP", "7")), int(os.environ.get("ODDSPAPI_MONTHLY_CAP", "240"))
+
+
+# ------------------------------------------------------------------ budget
+def _get_row(db: Session, key: str) -> dict:
+    row = db.get(AppSetting, key)
+    return dict(row.value) if row else {}
+
+
+def _put_row(db: Session, key: str, value: dict) -> None:
+    row = db.get(AppSetting, key)
+    if row:
+        row.value = value
+    else:
+        db.add(AppSetting(key=key, value=value))
+    db.flush()
+
+
+def usage(db: Session, now: datetime | None = None) -> dict:
+    now = now or utcnow()
+    u = _get_row(db, "oddspapi_usage")
+    day, month = now.strftime("%Y-%m-%d"), now.strftime("%Y-%m")
+    return {"day": day, "month": month, "today": u.get("days", {}).get(day, 0), "this_month": u.get("months", {}).get(month, 0)}
+
+
+def can_spend(db: Session, n: int = 1, now: datetime | None = None) -> bool:
+    if not api_key():
+        return False
+    u = usage(db, now)
+    d, m = caps()
+    return u["today"] + n <= d and u["this_month"] + n <= m
+
+
+def _record(db: Session, now: datetime) -> None:
+    u = _get_row(db, "oddspapi_usage")
+    day, month = now.strftime("%Y-%m-%d"), now.strftime("%Y-%m")
+    days = {k: v for k, v in u.get("days", {}).items() if k >= (now - timedelta(days=40)).strftime("%Y-%m-%d")}
+    months = dict(u.get("months", {}))
+    days[day] = days.get(day, 0) + 1
+    months[month] = months.get(month, 0) + 1
+    _put_row(db, "oddspapi_usage", {"days": days, "months": months})
+
+
+def _request(db: Session, path: str, now: datetime, **params):
+    """One counted request. Returns parsed JSON or None. Never logs the key."""
+    _record(db, now)
+    params["apiKey"] = api_key()
+    try:
+        r = httpx.get(f"{BASE}/{path}", params=params, timeout=30)
+    except Exception as e:  # noqa
+        log.warning("oddspapi %s failed: %s", path, e.__class__.__name__)
+        return None
+    if r.status_code != 200:
+        try:
+            msg = (r.json().get("error") or {}).get("code")
+        except Exception:  # noqa
+            msg = None
+        log.warning("oddspapi %s: HTTP %s %s", path, r.status_code, msg)
+        return None
+    return r.json()
+
+
+# ------------------------------------------------------------------ names and matching
+def norm(name: str) -> frozenset:
+    """'Brunner, Marian' and 'Marian Brunner' -> the same token set."""
+    s = strip_diacritics(name or "").lower().replace(",", " ").replace(".", " ").replace("-", " ")
+    return frozenset(t for t in s.split() if t)
+
+
+def find_fixture(fixtures: list[dict], p1: str, p2: str, start: datetime) -> tuple[dict, bool] | None:
+    """Returns (fixture, flipped) where flipped means OddsPapi lists our player 2 first."""
+    a, b = norm(p1), norm(p2)
+    best = None
+    for f in fixtures:
+        st = datetime.fromisoformat(f["startTime"].replace("Z", "+00:00"))
+        if abs((st - as_utc(start)).total_seconds()) > 45 * 60:
+            continue
+        x, y = norm(f.get("participant1Name", "")), norm(f.get("participant2Name", ""))
+        if (x, y) == (a, b):
+            best = (f, False)
+        elif (x, y) == (b, a):
+            best = (f, True)
+    return best
+
+
+def fixtures(db: Session, need_start: datetime, now: datetime | None = None) -> list[dict]:
+    """Cached TT Elite fixture list; refreshed (1 credit) only if stale and it doesn't cover `need_start`."""
+    now = now or utcnow()
+    cache = _get_row(db, "oddspapi_fixtures")
+    fx = cache.get("fixtures", [])
+    fetched = datetime.fromisoformat(cache["fetched_at"]) if cache.get("fetched_at") else None
+    if fetched and now - fetched < FIXTURE_REFRESH:     # at most one list request every 3 hours
+        return fx
+    if not can_spend(db, 2, now):          # keep 1 credit for the odds call itself
+        return fx
+    until = (now + timedelta(days=2)).strftime("%Y-%m-%d")
+    data = _request(db, "fixtures", now, tournamentId=TT_ELITE_TOURNAMENT,
+                    **{"from": now.strftime("%Y-%m-%d"), "to": until})
+    if data is None:
+        return fx
+    keep = [{"fixtureId": f["fixtureId"], "startTime": f["startTime"], "participant1Name": f.get("participant1Name", ""),
+             "participant2Name": f.get("participant2Name", ""), "statusName": f.get("statusName", "")}
+            for f in data if f.get("statusName") != "Cancelled"]
+    _put_row(db, "oddspapi_fixtures", {"fixtures": keep, "fetched_at": now.isoformat(), "until": until})
+    return keep
+
+
+# ------------------------------------------------------------------ board parsing
+def winner_pairs(board: dict) -> dict[str, tuple[float, float]]:
+    out = {}
+    for slug, book in (board.get("bookmakerOdds") or {}).items():
+        if "+" in slug or slug in ("demo", "singbet-b"):
+            continue
+        if book.get("suspended") or book.get("bookmakerIsActive") is False:
+            continue
+        legs = ((book.get("markets") or {}).get(WINNER) or {}).get("outcomes", {})
+        try:
+            a, b = legs["251"]["players"]["0"], legs["252"]["players"]["0"]
+        except KeyError:
+            continue
+        if a.get("active") is False or b.get("active") is False:
+            continue
+        pa, pb = float(a["price"]), float(b["price"])
+        if pa <= 1.0 or pb <= 1.0 or 1 / pa + 1 / pb <= 1.0:
+            continue
+        out[slug] = (pa, pb)
+    return out
+
+
+def consensus_p1(pairs: dict[str, tuple[float, float]]) -> float | None:
+    """Median no-vig probability for participant 1 over distinct price pairs (book skins share pairs)."""
+    distinct = set(pairs.values())
+    if len(distinct) < 3:
+        return None
+    return statistics.median((1 / a) / (1 / a + 1 / b) for a, b in distinct)
+
+
+def market_check(db: Session, p1_name: str, p2_name: str, start: datetime, now: datetime | None = None) -> dict | None:
+    """Hard Rock's Winner prices and the consensus, oriented to OUR player 1. None if unavailable or no budget."""
+    now = now or utcnow()
+    if not api_key() or as_utc(start) <= now + timedelta(minutes=2):
+        return None
+    fx = fixtures(db, start, now)
+    hit = find_fixture(fx, p1_name, p2_name, start)
+    if not hit or not can_spend(db, 1, now):
+        return {"status": "no_fixture" if not hit else "no_budget"}
+    f, flipped = hit
+    board = _request(db, "odds", now, fixtureId=f["fixtureId"])
+    if board is None:
+        return {"status": "error"}
+    pairs = winner_pairs(board)
+    if flipped:
+        pairs = {k: (b, a) for k, (a, b) in pairs.items()}
+    hr = pairs.get(HARD_ROCK)
+    cons = consensus_p1(pairs)
+    return {"status": "ok", "books": len(pairs), "hard_rock": hr, "consensus_p1": cons, "fixture_id": f["fixtureId"]}

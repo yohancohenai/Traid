@@ -119,3 +119,29 @@ def test_rejection_reasons_are_counted(f, db):
     picks = build_picks(db, stats=st)
     assert len(picks) == 1
     assert st["in_window"] == 4 and st["low_quality"] == 1 and st["too_uncertain"] == 1 and st["below_min_prob"] == 1
+
+
+def test_message_shows_real_hard_rock_and_market(f, db):
+    _setup(db)
+    m = _m(f, db, 30, names=("Mateusz Baran", "Miroslaw Lewczuk"))
+    from ttq.models import Prediction
+    pred = db.query(Prediction).filter_by(match_id=m.id).one()
+    info = {"hr_american": -125, "hr_decimal": 1.8, "consensus_p": 0.58, "books": 36, "market_ev_at_hr": 0.044}
+    _, body = conditional_pick_text(db, m, pred, "p1", 0.62, -135, info)
+    lines = body.splitlines()
+    assert lines[2] == "Odds: 1.80 (-125) Hard Rock now | Prob: 62.0% | EV: 11.6%"
+    assert "Market fair: -138 (58.0%, 36 books) | Edge vs market: +4.4%" in body
+    assert lines[-1] == "Bet only if Hard Rock odds >= -135 (1.74)"
+
+
+def test_market_rejection_is_not_sent_but_logged(f, db, monkeypatch):
+    _setup(db)
+    _m(f, db, 30)
+    monkeypatch.setattr("ttq.providers.oddspapi.market_check",
+                        lambda *a, **k: {"status": "ok", "books": 30, "hard_rock": (1.3, 3.5), "consensus_p1": 0.66})
+    sent = []
+    monkeypatch.setattr("ttq.services.alerts._send_telegram", lambda t, b: sent.append(t) or True)
+    r = picks_job(db)
+    assert r["sent"] == 0 and len(r["skipped_by_market"]) == 1 and not sent
+    from ttq.models import AppSetting
+    assert db.get(AppSetting, "market_checks").value["items"][-1]["sent"] is False

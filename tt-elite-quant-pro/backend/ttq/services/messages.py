@@ -62,7 +62,8 @@ def _model_line(db: Session, pred: Prediction) -> str:
     return f"{mv.name}_{mv.version}" + (f" ({mv.trained_at:%Y-%m-%d})" if mv.trained_at else "")
 
 
-def conditional_pick_text(db: Session, m: Match, pred: Prediction, side: str, p: float, min_american: int) -> tuple[str, str]:
+def conditional_pick_text(db: Session, m: Match, pred: Prediction, side: str, p: float, min_american: int,
+                          market: dict | None = None) -> tuple[str, str]:
     """'New Bet Recommendation (conditional)': no Hard Rock price is known, so the pick is only valid at or above
     `min_american`."""
     from ttq.odds.math import american_to_decimal
@@ -71,15 +72,28 @@ def conditional_pick_text(db: Session, m: Match, pred: Prediction, side: str, p:
     pick = m.player1.canonical_name if side == "p1" else m.player2.canonical_name
     dec = american_to_decimal(min_american)
     ruleset_date = (F.get("selected_by") or "default").replace("calib-period grid ", "calib ")
-    body = "\n".join([
+    market = market or {}
+    hr_am, hr_dec = market.get("hr_american"), market.get("hr_decimal")
+    if hr_am is not None:      # real Hard Rock price from the live board
+        odds_line = f"Odds: {hr_dec:.2f} ({hr_am:+d}) Hard Rock now | Prob: {p:.1%} | EV: {p * hr_dec - 1:.1%}"
+    else:
+        odds_line = f"Odds: {dec:.2f} ({min_american:+d}) | Prob: {p:.1%} | EV: {p * dec - 1:.1%}"
+    lines = [
         f"{m.player1.canonical_name} vs {m.player2.canonical_name}",
         f"Pick: {pick} ({'HOME' if side == 'p1' else 'AWAY'})",
-        f"Odds: {dec:.2f} ({min_american:+d}) | Prob: {p:.1%} | EV: {p * dec - 1:.1%}",
+        odds_line,
         f"Units: {float(alerts.get('units_per_bet', 1.0)):.1f}",
         f"Match: {_match_time(db, m)}",
         f"Model: {_model_line(db, pred)}",
         f"Ruleset: EV>={F['min_ev']:.0%}, edge>={F['min_edge']:.0%}, EV@low>={F['min_ev_low']:.0%} ({ruleset_date})",
-        "",
-        f"Bet only if Hard Rock odds >= {min_american:+d} ({dec:.2f})",
-    ])
+    ]
+    cp = market.get("consensus_p")
+    if cp:
+        from ttq.odds.math import decimal_to_american
+        fair = decimal_to_american(1 / cp)
+        mev = market.get("market_ev_at_hr")
+        lines.append(f"Market fair: {fair:+d} ({cp:.1%}, {market.get('books')} books)"
+                     + (f" | Edge vs market: {mev:+.1%}" if mev is not None else ""))
+    lines += ["", f"Bet only if Hard Rock odds >= {min_american:+d} ({dec:.2f})"]
+    body = "\n".join(lines)
     return "New Bet Recommendation", body

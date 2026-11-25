@@ -108,6 +108,7 @@ def _picks(db: Session, tz) -> tuple[list[dict], dict]:
                     "sent": _fmt(datetime.fromisoformat(pk["sent_at"]), tz), "match_time": _fmt(m.scheduled_at, tz),
                     "match": f"{m.player1.canonical_name} vs {m.player2.canonical_name}", "pick": name,
                     "prob": pk.get("p"), "min": pk["min_american"], "hr_action": pk.get("hr_action"), "hr_price": hr,
+                    "hr_auto": pk.get("hr_auto"), "consensus_p": pk.get("consensus_p"),
                     "score": f"{m.sets_p1}-{m.sets_p2}" if m.sets_p1 is not None else None,
                     "result": result, "units": units})
     rec["units"] = round(rec["units"], 2)
@@ -166,11 +167,19 @@ def build_data(db: Session, now: datetime | None = None) -> dict:
     cfg = get_setting(db, "alerts")
     test = (champ.metrics or {}).get("test", {}) if champ else {}
     upcoming = _upcoming(db, now, tz)
+    from ttq.providers.oddspapi import caps, usage
+    mrow = db.get(AppSetting, "market_checks")
+    checks = (mrow.value.get("items") if mrow else None) or []
+    d_cap, m_cap = caps()
     lrow = db.get(AppSetting, "learning_log")
     entries = (lrow.value.get("entries") if lrow else None) or []
     return {
         "learning": {"last": entries[-1] if entries else None,
                      "history": [{k: e[k] for k in ("date", "matches", "threshold_after", "note")} for e in entries[-10:]][::-1]},
+        "market": {"usage": {**usage(db, now), "daily_cap": d_cap, "monthly_cap": m_cap},
+                   "checks": [{k: c.get(k) for k in ("at", "match", "pick", "p", "min_american", "hr_american",
+                                                     "consensus_p", "books", "market_ev_at_hr", "sent", "reason", "market")}
+                              for c in checks[-25:]][::-1]},
         "stats": _stats(picks),
         "model_test": {"accuracy": test.get("accuracy"), "log_loss": test.get("log_loss"), "n": test.get("n")},
         "upcoming_passing": sum(u["status"] == "passes rules" for u in upcoming),
