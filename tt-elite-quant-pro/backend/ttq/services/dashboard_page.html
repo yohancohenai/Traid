@@ -173,6 +173,7 @@ function render(d) {
     ${kpi("Units", s.settled ? sgn(s.units) : "–", "1 unit per pick at its minimum price", cls(s.units))}
     ${kpi("ROI", s.roi == null ? "–" : sgn(s.roi * 100, 1) + "%", s.settled ? `over ${s.settled} settled picks` : "–", cls(s.roi))}
     ${kpi("Record", s.settled ? `${s.wins}-${s.losses}` : "–", `${s.pending} pending · ${s.voids} void`)}
+    ${kpi("Beat the close (CLV)", s.clv_n ? sgn(s.clv_avg * 100, 1) + "%" : "–", s.clv_n ? `${s.clv_beat} of ${s.clv_n} picks beat the closing price` : "Measured from the market's closing price", cls(s.clv_avg))}
     ${kpi("Your bets", bn ? `${r.bw}-${r.bl}` : "–", bn ? `${sgn(r.bunits)}u at your Hard Rock prices` : "Reply in Telegram to log", cls(r.bunits))}
   </div>`;
   const form = s.last10 ? `<span class="form">${[...s.last10].map(c => `<b class="${c}">${c}</b>`).join("")}</span>` : `<span class="muted">–</span>`;

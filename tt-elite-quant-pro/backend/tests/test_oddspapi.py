@@ -81,3 +81,45 @@ def test_decision_rules():
     assert not send and "disagree" in info["reason"]
     assert decide_with_market("p1", 0.62, -135, None)[0] is True          # no market data: pick goes out as before
     assert decide_with_market("p1", 0.62, -135, {**ok, "hard_rock": None})[0] is True
+
+
+def test_hard_rock_outlier_is_skipped():
+    mk = {"status": "ok", "books": 30, "hard_rock": (1.25, 4.0), "consensus_p1": 0.60}   # HR ~76% vs market 60%
+    send, info = decide_with_market("p2", 0.62, -135, {**mk})
+    assert not send and "far from every other book" in info["reason"]
+
+
+def test_units_flat_until_clv_proven(db):
+    from ttq.services.summary import log_picks
+    from ttq.services.targets import suggested_units
+    assert suggested_units(db, 0.05, 1.8) == 1.0
+    log_picks(db, [{"match_id": 10_000 + i, "side": "p1", "p": 0.6, "min_american": -135} for i in range(100)])
+    from ttq.models import AppSetting
+    row = db.get(AppSetting, "picks_log")
+    row.value = {k: {**v, "clv": 0.03} for k, v in row.value.items()}
+    db.flush()
+    u = suggested_units(db, 0.05, 1.8)
+    assert u == 0.8                                   # quarter-Kelly: 0.05 edge at 1.80 -> 0.8 units
+    assert suggested_units(db, -0.01, 1.8) == 1.0
+
+
+def test_closing_line_records_clv(f, db, monkeypatch):
+    from ttq.services.summary import log_picks
+    from ttq.services.targets import closing_lines
+    monkeypatch.setenv("ODDSPAPI_KEY", "k")
+    a, b = f.player(), f.player()
+    m = f.match(a, b, at=utcnow() + timedelta(minutes=4))
+    log_picks(db, [{"match_id": m.id, "side": "p1", "p": 0.62, "min_american": -135, "fixture_id": "x9",
+                    "flipped": False, "hr_auto_dec": 1.80}])
+    monkeypatch.setattr(op, "board_by_fixture", lambda *a, **k: {"status": "ok", "books": 30,
+                                                                 "hard_rock": (1.70, 2.10), "consensus_p1": 0.58})
+    assert closing_lines(db)["closed"] == 1
+    from ttq.models import AppSetting
+    pk = db.get(AppSetting, "picks_log").value[str(m.id)]
+    assert pk["close_checked"] and abs(pk["clv"] - (1.80 * 0.58 - 1)) < 1e-4
+    assert closing_lines(db)["closed"] == 0          # never re-checked (no double credit use)
+
+
+def test_set_market_calibration_values():
+    from ttq.services.set_markets import fav_minus_1_5
+    assert 0.36 < fav_minus_1_5(0.6) < 0.42 and fav_minus_1_5(0.75) > fav_minus_1_5(0.6)

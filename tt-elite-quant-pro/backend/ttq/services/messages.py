@@ -82,11 +82,17 @@ def conditional_pick_text(db: Session, m: Match, pred: Prediction, side: str, p:
         f"{m.player1.canonical_name} vs {m.player2.canonical_name}",
         f"Pick: {pick} ({'HOME' if side == 'p1' else 'AWAY'})",
         odds_line,
-        f"Units: {float(alerts.get('units_per_bet', 1.0)):.1f}",
+        f"Units: {float(market.get('units') or alerts.get('units_per_bet', 1.0)):.1f}",
         f"Match: {_match_time(db, m)}",
         f"Model: {_model_line(db, pred)}",
         f"Ruleset: EV>={F['min_ev']:.0%}, edge>={F['min_edge']:.0%}, EV@low>={F['min_ev_low']:.0%} ({ruleset_date})",
     ]
+    if p >= 0.5:      # set handicap: calibrated on real results (see services/set_markets.py)
+        from ttq.odds.math import decimal_to_american
+        from ttq.services.set_markets import fav_minus_1_5, params
+        ph = fav_minus_1_5(p, params(db))
+        lines.append(f"Sets: {pick.split()[-1]} -1.5 fair {decimal_to_american(1 / ph):+d} ({ph:.0%}) | "
+                     f"to 5 sets fair {decimal_to_american(1 / params(db)['five_sets']):+d}")
     cp = market.get("consensus_p")
     if cp:
         from ttq.odds.math import decimal_to_american

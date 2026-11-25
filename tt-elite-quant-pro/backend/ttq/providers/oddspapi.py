@@ -191,4 +191,19 @@ def market_check(db: Session, p1_name: str, p2_name: str, start: datetime, now: 
         pairs = {k: (b, a) for k, (a, b) in pairs.items()}
     hr = pairs.get(HARD_ROCK)
     cons = consensus_p1(pairs)
-    return {"status": "ok", "books": len(pairs), "hard_rock": hr, "consensus_p1": cons, "fixture_id": f["fixtureId"]}
+    return {"status": "ok", "books": len(pairs), "hard_rock": hr, "consensus_p1": cons, "fixture_id": f["fixtureId"],
+            "flipped": flipped}
+
+
+def board_by_fixture(db: Session, fixture_id: str, flipped: bool, now: datetime | None = None) -> dict | None:
+    """Re-read one known fixture (1 credit), e.g. for the closing price. Oriented to our player 1."""
+    now = now or utcnow()
+    if not can_spend(db, 1, now):
+        return None
+    board = _request(db, "odds", now, fixtureId=fixture_id)
+    if board is None:
+        return None
+    pairs = winner_pairs(board)
+    if flipped:
+        pairs = {k: (b, a) for k, (a, b) in pairs.items()}
+    return {"status": "ok", "books": len(pairs), "hard_rock": pairs.get(HARD_ROCK), "consensus_p1": consensus_p1(pairs)}

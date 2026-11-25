@@ -111,7 +111,23 @@ def daily_self_check(db: Session, now: datetime | None = None, force: bool = Fal
         raise_alert(db, "learning", "Bot self-check: pick rule updated",
                     f"{note}.\nLast {LOOKBACK_DAYS} days, model favorites:\n{rows}\nNo action needed.",
                     f"learning:{today}", "INFO", False, rate_limited=False)
-    entry = {"date": today, "matches": len(pairs), "threshold_before": current, "threshold_after": new,
+    try:   # recalibrate set-score markets on live results (needs 800+ matches; keeps defaults until then)
+        from ttq.services.set_markets import refit
+        q = (select(Prediction.match_id, Prediction.p1_win, Prediction.as_of, Match.sets_p1, Match.sets_p2)
+             .join(Match, Match.id == Prediction.match_id)
+             .where(Match.is_demo.is_(False), Match.status == "FINISHED", Match.sets_p1.isnot(None),
+                    Match.scheduled_at >= now - timedelta(days=30), Prediction.is_backtest.is_(False),
+                    Prediction.as_of <= Match.scheduled_at))
+        best: dict = {}
+        for mid, p1, as_of, s1, s2 in db.execute(q):
+            if mid not in best or as_of > best[mid][0]:
+                best[mid] = (as_of, p1, s1, s2)
+        rows = [(max(p1, 1 - p1), s1 if p1 >= 0.5 else s2, s2 if p1 >= 0.5 else s1, True)
+                for _, p1, s1, s2 in best.values()]
+        set_fit = refit(db, rows)
+    except Exception:  # noqa
+        set_fit = None
+    entry = {"date": today, "set_market_refit": bool(set_fit), "matches": len(pairs), "threshold_before": current, "threshold_after": new,
              "note": note, "table": table, **cleaned}
     row = db.get(AppSetting, "learning_log")
     hist = (list(row.value.get("entries", [])) if row else [])[-59:] + [entry]

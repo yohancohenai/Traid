@@ -108,7 +108,7 @@ def _picks(db: Session, tz) -> tuple[list[dict], dict]:
                     "sent": _fmt(datetime.fromisoformat(pk["sent_at"]), tz), "match_time": _fmt(m.scheduled_at, tz),
                     "match": f"{m.player1.canonical_name} vs {m.player2.canonical_name}", "pick": name,
                     "prob": pk.get("p"), "min": pk["min_american"], "hr_action": pk.get("hr_action"), "hr_price": hr,
-                    "hr_auto": pk.get("hr_auto"), "consensus_p": pk.get("consensus_p"),
+                    "hr_auto": pk.get("hr_auto"), "consensus_p": pk.get("consensus_p"), "clv": pk.get("clv"),
                     "score": f"{m.sets_p1}-{m.sets_p2}" if m.sets_p1 is not None else None,
                     "result": result, "units": units})
     rec["units"] = round(rec["units"], 2)
@@ -149,7 +149,9 @@ def _stats(picks: list[dict]) -> dict:
         buckets[name] = {"n": len(grp), "w": gw, "l": len(grp) - gw,
                          "hit": (gw / len(grp)) if grp else None,
                          "units": round(sum(p["units"] for p in grp), 2)}
-    return {"settled": n, "wins": wins, "losses": n - wins, "hit_rate": (wins / n) if n else None,
+    clvs = [p["clv"] for p in picks if p.get("clv") is not None]
+    return {"clv_n": len(clvs), "clv_avg": (sum(clvs) / len(clvs)) if clvs else None,
+            "clv_beat": sum(1 for c in clvs if c > 0), "settled": n, "wins": wins, "losses": n - wins, "hit_rate": (wins / n) if n else None,
             "expected_hit_rate": exp, "units": round(units, 2), "roi": (units / n) if n else None,
             "avg_min_price": round(sum(p["min"] for p in settled) / n) if n else None,
             "pending": sum(p["result"] == "pending" for p in picks), "voids": sum(p["result"] == "void" for p in picks),

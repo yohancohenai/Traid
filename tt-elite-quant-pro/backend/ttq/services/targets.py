@@ -197,6 +197,7 @@ def build_picks(db: Session, now: datetime | None = None, stats: dict | None = N
 
 
 MARKET_DISAGREE = -0.03   # skip if, at Hard Rock's price, the consensus of other books says EV is below -3%
+HR_OUTLIER = 0.12         # skip if Hard Rock's no-vig chance is 12+ points away from every other book (stale/void line)
 
 
 def decide_with_market(side: str, p: float, min_american: int, mk: dict | None) -> tuple[bool, dict]:
@@ -213,11 +214,16 @@ def decide_with_market(side: str, p: float, min_american: int, mk: dict | None) 
         info["reason"] = "Hard Rock not pricing it"
         return True, info
     hr_dec = hr[0] if side == "p1" else hr[1]
+    hr_novig = (1 / hr_dec) / (1 / hr[0] + 1 / hr[1])
     from ttq.odds.math import decimal_to_american
     info["hr_american"] = decimal_to_american(hr_dec)
     info["hr_decimal"] = round(hr_dec, 3)
     info["model_ev_at_hr"] = round(p * hr_dec - 1, 4)
     info["market_ev_at_hr"] = round(cons * hr_dec - 1, 4) if cons is not None else None
+    if cons is not None and abs(hr_novig - cons) > HR_OUTLIER:
+        info["reason"] = (f"Hard Rock's line ({hr_novig:.0%}) is far from every other book ({cons:.0%}); "
+                          "possible stale or void line")
+        return False, info
     if hr_dec < american_to_decimal(min_american) - 1e-9:
         info["reason"] = f"Hard Rock {info['hr_american']:+d} is below the minimum {min_american:+d}"
         return False, info
@@ -226,6 +232,63 @@ def decide_with_market(side: str, p: float, min_american: int, mk: dict | None) 
         return False, info
     info["reason"] = "Hard Rock price passes"
     return True, info
+
+
+def clv_record(db: Session) -> tuple[int, float | None]:
+    row = db.get(AppSetting, "picks_log")
+    vals = [v["clv"] for v in (row.value if row else {}).values() if v.get("clv") is not None]
+    return len(vals), (sum(vals) / len(vals) if vals else None)
+
+
+def suggested_units(db: Session, edge_vs_market: float | None, dec: float | None) -> float:
+    """Flat 1 unit until the closing-line record proves an edge (100+ closes, average CLV > 0); then
+    quarter-Kelly on the edge vs the market, capped to 0.5-2 units."""
+    n, avg = clv_record(db)
+    if n < 100 or avg is None or avg <= 0 or edge_vs_market is None or not dec or edge_vs_market <= 0:
+        return 1.0
+    kelly = edge_vs_market / (dec - 1)
+    return round(min(2.0, max(0.5, 0.25 * kelly * 100 / 2)), 1)   # 1 unit ~ 2% of bankroll
+
+
+def closing_lines(db: Session, now: datetime | None = None) -> dict:
+    """Closing price for sent picks, read 1-8 minutes before start (1 credit each, only with credits to spare)."""
+    from ttq.providers.oddspapi import board_by_fixture, caps, usage
+    now = now or utcnow()
+    row = db.get(AppSetting, "picks_log")
+    if not row:
+        return {"closed": 0}
+    log = dict(row.value)
+    done = 0
+    for mid, pk in log.items():
+        if pk.get("close_checked") or not pk.get("fixture_id"):
+            continue
+        m = db.get(Match, int(mid))
+        if m is None:
+            continue
+        mins = (as_utc(m.scheduled_at) - now).total_seconds() / 60
+        if not (1 <= mins <= 8):
+            continue
+        u, (d_cap, _) = usage(db, now), caps()
+        if u["today"] >= d_cap - 1:        # always keep one credit for a new pick
+            continue
+        b = board_by_fixture(db, pk["fixture_id"], bool(pk.get("flipped")), now)
+        pk = dict(pk)
+        pk["close_checked"] = True
+        if b and b.get("status") == "ok":
+            side_p = lambda p1: None if p1 is None else (p1 if pk["side"] == "p1" else 1 - p1)
+            cp = side_p(b.get("consensus_p1"))
+            hr = b.get("hard_rock")
+            pk["close_consensus_p"] = round(cp, 4) if cp else None
+            pk["close_hr"] = (hr[0] if pk["side"] == "p1" else hr[1]) if hr else None
+            taken = pk.get("hr_auto_dec") or american_to_decimal(pk["min_american"])
+            if cp:
+                pk["clv"] = round(taken * cp - 1, 4)     # price taken vs the fair closing price
+        log[mid] = pk
+        done += 1
+    if done:
+        row.value = log
+        db.flush()
+    return {"closed": done}
 
 
 def _log_market_check(db: Session, row: dict) -> None:
@@ -251,6 +314,7 @@ def picks_job(db: Session) -> dict:
         except Exception:  # noqa
             mk = {"status": "error"}
         send, info = decide_with_market(pk["side"], pk["p"], pk["min_american"], mk)
+        info["units"] = suggested_units(db, info.get("market_ev_at_hr"), info.get("hr_decimal"))
         name = m.player1.canonical_name if pk["side"] == "p1" else m.player2.canonical_name
         _log_market_check(db, {"at": utcnow().isoformat(), "match_id": m.id, "match": f"{m.player1.canonical_name} vs "
                                f"{m.player2.canonical_name}", "pick": name, "p": round(pk["p"], 4),
@@ -264,8 +328,13 @@ def picks_job(db: Session) -> dict:
                     "channels": a.channels_sent if a else []})
         logged.append({"match_id": m.id, "side": pk["side"], "p": round(pk["p"], 4), "min_american": pk["min_american"],
                        "tg_msg": getattr(a, "telegram_message_id", None) if a else None, "pick_name": name,
-                       "hr_auto": info.get("hr_american"), "consensus_p": info.get("consensus_p"),
-                       "books": info.get("books")})
+                       "hr_auto": info.get("hr_american"), "hr_auto_dec": info.get("hr_decimal"),
+                       "consensus_p": info.get("consensus_p"), "books": info.get("books"), "units": info["units"],
+                       "fixture_id": (mk or {}).get("fixture_id"), "flipped": (mk or {}).get("flipped")})
     if logged:
         log_picks(db, logged)
-    return {"sent": len(out), "picks": out, "skipped_by_market": skipped, "checked": stats}
+    try:
+        closes = closing_lines(db)
+    except Exception:  # noqa
+        closes = {"closed": "error"}
+    return {"sent": len(out), "picks": out, "skipped_by_market": skipped, "checked": stats, "closing": closes}
