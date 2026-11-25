@@ -117,4 +117,10 @@ jobs:
         if: always() && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run tt-bot.yml --ref main --repo ${{ github.repository }}
+        run: |
+          # retry: one failed API call here would stop the whole chain until the backup timer fires
+          for i in 1 2 3 4 5 6; do
+            gh workflow run tt-bot.yml --ref main --repo ${{ github.repository }} && exit 0
+            echo "start-next-run attempt $i failed; retrying"; sleep $((i * 15))
+          done
+          exit 1
