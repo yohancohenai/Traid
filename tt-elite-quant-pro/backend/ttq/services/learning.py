@@ -88,7 +88,7 @@ def prune(db: Session, keep_days: int = 2) -> dict:
         ~exists().where(and_(latest.c.match_id == Prediction.match_id, latest.c.mx == Prediction.as_of)),
         ~exists().where(Recommendation.prediction_id == Prediction.id)).execution_options(synchronize_session=False))
     raw = db.execute(delete(RawObservation).where(
-        RawObservation.fetched_at < cutoff,
+        RawObservation.fetched_at < utcnow() - timedelta(hours=12),     # raw logs are only for short-term audit
         ~exists().where(OddsQuote.raw_observation_id == RawObservation.id)).execution_options(synchronize_session=False))
     return {"recommendations_deleted": r.rowcount, "predictions_deleted": p.rowcount, "raw_deleted": raw.rowcount}
 
