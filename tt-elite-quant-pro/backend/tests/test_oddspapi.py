@@ -123,3 +123,9 @@ def test_closing_line_records_clv(f, db, monkeypatch):
 def test_set_market_calibration_values():
     from ttq.services.set_markets import fav_minus_1_5
     assert 0.36 < fav_minus_1_5(0.6) < 0.42 and fav_minus_1_5(0.75) > fav_minus_1_5(0.6)
+
+
+def test_market_must_not_say_negative_ev():
+    mk = {"status": "ok", "books": 30, "hard_rock": (1.76, 2.05), "consensus_p1": 0.56}   # 0.56*1.76 = 0.986
+    send, info = decide_with_market("p1", 0.64, -135, mk)
+    assert not send and info["market_ev_at_hr"] < 0

@@ -196,7 +196,7 @@ def build_picks(db: Session, now: datetime | None = None, stats: dict | None = N
     return picks
 
 
-MARKET_DISAGREE = -0.03   # skip if, at Hard Rock's price, the consensus of other books says EV is below -3%
+MARKET_DISAGREE = 0.0     # model and market must agree: at Hard Rock's price the consensus of the other books must not say -EV
 HR_OUTLIER = 0.12         # skip if Hard Rock's no-vig chance is 12+ points away from every other book (stale/void line)
 
 
