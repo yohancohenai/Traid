@@ -263,15 +263,19 @@ def latest_sweep(db: Session) -> dict:
     return _get_row(db, "oddspapi_sweep")
 
 
-def sweep(db: Session, now: datetime | None = None, force: bool = False) -> dict:
-    """Run one bulk sweep if it's due, matches are coming up, and the budget allows. Stores all boards."""
+NEED_GAP_MIN = 40   # a pick candidate missing from the last sweep triggers a new one, at most this often
+
+
+def sweep(db: Session, now: datetime | None = None, force: bool = False, need: bool = False) -> dict:
+    """Run one bulk sweep if it's due (or a pick candidate needs it), and the budget allows. Stores all boards."""
     import time
     now = now or utcnow()
     if not api_key():
         return {"swept": False, "why": "no key"}
     last = latest_sweep(db)
+    gap = NEED_GAP_MIN if need else sweep_minutes()
     if not force and last.get("fetched_at") and \
-            now - datetime.fromisoformat(last["fetched_at"]) < timedelta(minutes=sweep_minutes()):
+            now - datetime.fromisoformat(last["fetched_at"]) < timedelta(minutes=gap):
         return {"swept": False, "why": "not due"}
     # Hard Rock lists TT Elite late, so on a small plan its credit is better spent on more frequent market sweeps
     books = ([HARD_ROCK] if os.environ.get("ODDSPAPI_SWEEP_HARDROCK", "1") == "1" else []) + ref_books()

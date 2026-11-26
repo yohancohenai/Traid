@@ -382,18 +382,25 @@ def picks_job(db: Session) -> dict:
     from ttq.services.messages import conditional_pick_text
     from ttq.services.summary import log_picks
     out, logged, stats, skipped, unmark = [], [], {}, [], []
+    resweep_tried = False
     try:
         swept = sweep(db)
     except Exception as e:  # noqa
         swept = {"swept": False, "why": f"error {e.__class__.__name__}"}
     sw = latest_sweep(db)
     fresh = bool(sw.get("fetched_at")) and (utcnow() - datetime.fromisoformat(sw["fetched_at"])).total_seconds() < 60 * sweep_fresh_minutes()
-    if not fresh:                     # no live market data: nothing can be confirmed, so nothing is sent
+    if not fresh and not sweep(db, need=True).get("swept"):   # no live market data: nothing can be confirmed
         return {"sent": 0, "picks": [], "skipped_by_market": [], "checked": {"no_fresh_sweep": True}, "sweep": swept}
     for pk in build_picks(db, stats=stats, max_minutes=SWEEP_WINDOW_MIN):
         m = pk["match"]
         try:
             mk = from_sweep(db, m.player1.canonical_name, m.player2.canonical_name, m.scheduled_at)
+            if mk.get("status") in ("not in sweep", "no fresh sweep") and not resweep_tried:
+                resweep_tried = True                      # the books list matches ~2 h ahead: fetch a newer board
+                r = sweep(db, need=True)
+                if r.get("swept"):
+                    swept = r
+                    mk = from_sweep(db, m.player1.canonical_name, m.player2.canonical_name, m.scheduled_at)
         except Exception:  # noqa
             mk = {"status": "error"}
         send, info = decide_with_market(pk["side"], pk["p"], pk["min_american"], mk, pk["pred"], get_filters(db, False))

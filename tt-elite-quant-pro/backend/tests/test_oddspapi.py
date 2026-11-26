@@ -242,3 +242,15 @@ def test_no_hard_rock_price_falls_back_to_market_minimum():
     send, _ = decide_with_market("p1", 0.88, -550, {**mk, "consensus_p1": 0.85, "refs": {"draftkings": (1.18, 4.8)}},
                                  _Pred(0.88, 0.84, 0.92))
     assert not send
+
+
+def test_need_triggers_early_sweep(db, monkeypatch):
+    monkeypatch.setenv("ODDSPAPI_KEY", "k")
+    monkeypatch.setenv("ODDSPAPI_SWEEP_MINUTES", "300")
+    now = utcnow()
+    op._put_row(db, "oddspapi_sweep", {"fetched_at": (now - timedelta(minutes=30)).isoformat(), "boards": {}, "books": []})
+    assert op.sweep(db, now, need=True)["why"] == "not due"                 # 30 min < 40 min gap
+    op._put_row(db, "oddspapi_sweep", {"fetched_at": (now - timedelta(minutes=50)).isoformat(), "boards": {}, "books": []})
+    assert op.sweep(db, now)["why"] == "not due"                            # background schedule not due
+    monkeypatch.setattr(op, "can_spend", lambda db, cost, now: False)
+    assert op.sweep(db, now, need=True)["why"].startswith("budget")         # a candidate needs it: due, budget decides
