@@ -84,7 +84,7 @@ def test_decision_rules():
     send, info = decide_with_market("p1", 0.64, -135, {**ok, "hard_rock": (1.50, 2.5), "consensus_p1": 0.64}, pred)
     assert not send                                                         # -200 but market says -4%
     assert decide_with_market("p1", 0.64, -135, None, pred)[0] is False     # no market -> no pick
-    assert decide_with_market("p1", 0.64, -135, {**ok, "hard_rock": None}, pred)[0] is False
+    assert decide_with_market("p1", 0.64, -135, {**ok, "hard_rock": None, "refs": {}}, pred)[0] is False
 
 
 def test_heavy_favourite_outside_band_is_never_sent():
@@ -225,3 +225,20 @@ def test_sweep_stays_usable_until_next_one_and_status(db, monkeypatch):
     assert op.from_sweep(db, "A B", "C D", now)["status"] == "no fresh sweep"
     st = op.sweep_status(db, now)
     assert st["matches"] == 1 and st["priced_by"] == {"hardrockbet": 1, "draftkings": 1} and st["last_sweep_min_ago"] == 480
+
+
+def test_no_hard_rock_price_falls_back_to_market_minimum():
+    pred = _Pred(0.66, 0.62, 0.70)
+    # DraftKings 1.70 / 2.15 -> fair ~55.8% for p1; model 66% -> needs max(1.03/0.66, 1/0.62, 1/0.558) = 1.79
+    mk = {"status": "ok", "books": 1, "hard_rock": None, "consensus_p1": 0.558, "refs": {"draftkings": (1.75, 2.10)}}
+    send, info = decide_with_market("p1", 0.66, -135, mk, pred)
+    assert send and info["side"] == "p1" and info["hr_listed"] is False
+    from ttq.odds.math import american_to_decimal
+    assert american_to_decimal(info["min_american"]) >= 1.79 and info["min_decimal"] <= 1.75 * 1.03
+    # other books pay far less than the model needs -> no pick
+    send, info = decide_with_market("p1", 0.66, -135, {**mk, "refs": {"draftkings": (1.45, 2.80)}, "consensus_p1": 0.66}, pred)
+    assert not send and "Hard Rock not listed" in info["reason"]
+    # -500 favourite never qualifies
+    send, _ = decide_with_market("p1", 0.88, -550, {**mk, "consensus_p1": 0.85, "refs": {"draftkings": (1.18, 4.8)}},
+                                 _Pred(0.88, 0.84, 0.92))
+    assert not send

@@ -97,9 +97,11 @@ def conditional_pick_text(db: Session, m: Match, pred: Prediction, side: str, p:
     if cp:
         from ttq.odds.math import decimal_to_american
         fair = decimal_to_american(1 / cp)
-        mev = market.get("market_ev_at_hr")
+        mev = market.get("market_ev_at_hr", market.get("market_ev_at_min"))
         lines.append(f"Market fair: {fair:+d} ({cp:.1%}, {market.get('books')} books)"
                      + (f" | Edge vs market: {mev:+.1%}" if mev is not None else ""))
+    if market.get("hr_listed") is False:
+        lines.append("Hard Rock: not listed at last check. Open the app and compare with the line below")
     lines += ["", f"Bet only if Hard Rock odds >= {min_american:+d} ({dec:.2f})"]
     body = "\n".join(lines)
     return "New Bet Recommendation", body

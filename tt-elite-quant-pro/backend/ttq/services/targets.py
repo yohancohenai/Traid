@@ -223,13 +223,12 @@ def decide_with_market(side: str, p: float, min_american: int, mk: dict | None, 
     info["books"] = mk.get("books")
     cons_p1 = mk.get("consensus_p1")
     hr = mk.get("hard_rock")
-    if not hr:
-        info["reason"] = "Hard Rock not pricing it"
-        return False, info
     if cons_p1 is None:
         info["reason"] = "too few books for a fair price"
         return False, info
     F = F or {"min_ev": 0.03, "min_ev_low": 0.0}
+    if not hr:      # Hard Rock lists TT Elite late: decide on the market, send the minimum Hard Rock price to accept
+        return _decide_without_hr(p, side, pred, cons_p1, mk, F, info)
     from ttq.odds.math import decimal_to_american
     hr_novig_p1 = (1 / hr[0]) / (1 / hr[0] + 1 / hr[1])
     if abs(hr_novig_p1 - cons_p1) > HR_OUTLIER:
@@ -266,6 +265,41 @@ def decide_with_market(side: str, p: float, min_american: int, mk: dict | None, 
         return False, info
     info.update(best)
     info["reason"] = "misplaced Hard Rock line: model and market both say +EV"
+    return True, info
+
+
+REACH = 1.03   # the minimum asked of Hard Rock may sit at most 3% above the best price the other books offer
+
+
+def _decide_without_hr(p: float, side: str, pred, cons_p1: float, mk: dict, F: dict, info: dict) -> tuple[bool, dict]:
+    """No Hard Rock price at the last sweep. A side qualifies when the model has >= min_ev (and >= min_ev_low at the
+    low end of its range) at a price that is also fair-or-better versus the other books, inside -200..+200, and
+    realistically on offer (within REACH of what the other books pay). The pick then says: bet only at that price."""
+    from ttq.odds.math import decimal_to_american
+    refs = mk.get("refs") or {}
+    sides = _sides(pred, p, side) if pred is not None else [(side, p, p)]
+    best, notes = None, []
+    for sd, mp, lo in sides:
+        cons = cons_p1 if sd == "p1" else 1 - cons_p1
+        offered = max([(a if sd == "p1" else b) for a, b in refs.values()] or [0])
+        need = max((1 + F["min_ev"]) / mp, (1 + F["min_ev_low"]) / max(lo, 1e-6), 1 / cons, PRICE_MIN)
+        am = round_up_american(need)
+        need = american_to_decimal(am)
+        if need > PRICE_MAX:
+            notes.append(f"{sd}: would need {am:+d}, outside -200..+200")
+            continue
+        if not offered or need > offered * REACH:
+            notes.append(f"{sd}: needs {am:+d}, other books only pay {decimal_to_american(offered) if offered else 0:+d}")
+            continue
+        row = {"side": sd, "p": round(mp, 4), "consensus_p": round(cons, 4), "min_american": am, "min_decimal": round(need, 3),
+               "ref_decimal": round(offered, 3), "market_ev_at_min": round(cons * need - 1, 4), "hr_listed": False}
+        if best is None or need / offered < best["min_decimal"] / best["ref_decimal"]:
+            best = row
+    if best is None:
+        info["reason"] = "Hard Rock not listed yet; " + ("; ".join(notes) or "no side passes")
+        return False, info
+    info.update(best)
+    info["reason"] = "model and market agree; Hard Rock not listed at last check, bet only at the minimum price"
     return True, info
 
 
@@ -347,7 +381,7 @@ def picks_job(db: Session) -> dict:
     from ttq.services.alerts import raise_alert
     from ttq.services.messages import conditional_pick_text
     from ttq.services.summary import log_picks
-    out, logged, stats, skipped = [], [], {}, []
+    out, logged, stats, skipped, unmark = [], [], {}, [], []
     try:
         swept = sweep(db)
     except Exception as e:  # noqa
@@ -363,7 +397,11 @@ def picks_job(db: Session) -> dict:
         except Exception:  # noqa
             mk = {"status": "error"}
         send, info = decide_with_market(pk["side"], pk["p"], pk["min_american"], mk, pk["pred"], get_filters(db, False))
-        if send and info.get("side") and info["side"] != pk["side"]:      # the market made the other side the play
+        if info.get("market") in ("no fresh sweep", "not in sweep", "error"):
+            unmark.append(m.id)             # nothing decided: look again when the next sweep arrives
+        if send and info.get("hr_listed") is False:
+            pk = {**pk, "side": info["side"], "p": info["p"], "min_american": info["min_american"]}
+        elif send and info.get("side") and info["side"] != pk["side"]:      # the market made the other side the play
             pk = {**pk, "side": info["side"], "p": info["p"]}
             t = side_target(info["p"], (pk["pred"].p1_ci_low if info["side"] == "p1" else 1 - pk["pred"].p1_ci_high),
                             get_filters(db, False))
@@ -387,6 +425,11 @@ def picks_job(db: Session) -> dict:
                        "fixture_id": (mk or {}).get("fixture_id"), "flipped": (mk or {}).get("flipped")})
     if logged:
         log_picks(db, logged)
+    if unmark:
+        row = db.get(AppSetting, "picks_sent")
+        if row:
+            row.value = {k: v for k, v in row.value.items() if int(k) not in unmark}
+            db.flush()
     try:
         closes = closing_lines(db)
     except Exception:  # noqa
