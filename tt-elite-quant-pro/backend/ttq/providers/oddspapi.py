@@ -270,7 +270,8 @@ def sweep(db: Session, now: datetime | None = None, force: bool = False) -> dict
     if not force and last.get("fetched_at") and \
             now - datetime.fromisoformat(last["fetched_at"]) < timedelta(minutes=sweep_minutes()):
         return {"swept": False, "why": "not due"}
-    books = [HARD_ROCK] + ref_books()
+    # Hard Rock lists TT Elite late, so on a small plan its credit is better spent on more frequent market sweeps
+    books = ([HARD_ROCK] if os.environ.get("ODDSPAPI_SWEEP_HARDROCK", "1") == "1" else []) + ref_books()
     cache = _get_row(db, "oddspapi_fixtures")
     fx_fresh = cache.get("fetched_at") and now - datetime.fromisoformat(cache["fetched_at"]) < FIXTURE_REFRESH
     cost = len(books) + (0 if fx_fresh else 1)
