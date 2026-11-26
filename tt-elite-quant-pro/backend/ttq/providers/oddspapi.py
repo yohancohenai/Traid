@@ -246,8 +246,11 @@ def sweep_status(db: Session, now: datetime | None = None) -> dict:
         for slug in b.get("books", {}):
             per_book[slug] = per_book.get(slug, 0) + 1
     age = round((now - datetime.fromisoformat(sw["fetched_at"])).total_seconds() / 60) if sw.get("fetched_at") else None
+    checks = (_get_row(db, "market_checks").get("items") or [])[-6:]
+    recent = [{"at": c.get("at", "")[11:16], "match": c.get("match"), "pick": c.get("pick"), "sent": c.get("sent"),
+               "reason": c.get("reason")} for c in checks]
     return {"last_sweep_min_ago": age, "matches": len(sw.get("boards", {})), "priced_by": per_book,
-            "usage": usage(db, now)}
+            "usage": usage(db, now), "recent_market_checks": recent}
 
 
 def fair_p1(pairs: dict[str, tuple[float, float]], books: list[str]) -> tuple[float | None, int]:
