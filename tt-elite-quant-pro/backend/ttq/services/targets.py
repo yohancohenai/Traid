@@ -268,22 +268,27 @@ def decide_with_market(side: str, p: float, min_american: int, mk: dict | None, 
     return True, info
 
 
-REACH = 1.03   # the minimum asked of Hard Rock may sit at most 3% above the best price the other books offer
+REACH = 1.10          # Hard Rock lags the market; ask at most 10% above what the other books pay
+BLEND_MIN_EV = 0.02   # edge required at the minimum price, vs the model/market blend
 
 
 def _decide_without_hr(p: float, side: str, pred, cons_p1: float, mk: dict, F: dict, info: dict) -> tuple[bool, dict]:
-    """No Hard Rock price at the last sweep. A side qualifies when the model has >= min_ev (and >= min_ev_low at the
-    low end of its range) at a price that is also fair-or-better versus the other books, inside -200..+200, and
-    realistically on offer (within REACH of what the other books pay). The pick then says: bet only at that price."""
+    """No Hard Rock price at the last sweep. Pick the side both the model and the market make the favourite (model
+    60%+ is checked upstream), estimate its chance as the average of model and market (markets are usually the
+    better single estimate, the model adds its own information), and send the minimum Hard Rock price that gives
+    >= BLEND_MIN_EV at that chance, inside -200..+200 and within REACH of what the other books pay. Hard Rock often
+    lags the market, so this is a 'misplaced line' alert: bet only if Hard Rock is at or above it."""
     from ttq.odds.math import decimal_to_american
     refs = mk.get("refs") or {}
     sides = _sides(pred, p, side) if pred is not None else [(side, p, p)]
     best, notes = None, []
     for sd, mp, lo in sides:
         cons = cons_p1 if sd == "p1" else 1 - cons_p1
+        if mp < 0.5 or cons < 0.5:
+            continue                       # only a favourite that model and market agree on
         offered = max([(a if sd == "p1" else b) for a, b in refs.values()] or [0])
-        need = max((1 + F["min_ev"]) / mp, (1 + F["min_ev_low"]) / max(lo, 1e-6), 1 / cons, PRICE_MIN)
-        am = round_up_american(need)
+        pb = (mp + cons) / 2
+        am = round_up_american(max((1 + BLEND_MIN_EV) / pb, PRICE_MIN))
         need = american_to_decimal(am)
         if need > PRICE_MAX:
             notes.append(f"{sd}: would need {am:+d}, outside -200..+200")
@@ -291,15 +296,14 @@ def _decide_without_hr(p: float, side: str, pred, cons_p1: float, mk: dict, F: d
         if not offered or need > offered * REACH:
             notes.append(f"{sd}: needs {am:+d}, other books only pay {decimal_to_american(offered) if offered else 0:+d}")
             continue
-        row = {"side": sd, "p": round(mp, 4), "consensus_p": round(cons, 4), "min_american": am, "min_decimal": round(need, 3),
-               "ref_decimal": round(offered, 3), "market_ev_at_min": round(cons * need - 1, 4), "hr_listed": False}
-        if best is None or need / offered < best["min_decimal"] / best["ref_decimal"]:
-            best = row
+        best = {"side": sd, "p": round(pb, 4), "model_p": round(mp, 4), "consensus_p": round(cons, 4),
+                "min_american": am, "min_decimal": round(need, 3), "ref_decimal": round(offered, 3),
+                "market_ev_at_min": round(cons * need - 1, 4), "hr_listed": False}
     if best is None:
-        info["reason"] = "Hard Rock not listed yet; " + ("; ".join(notes) or "no side passes")
+        info["reason"] = "Hard Rock not listed yet; " + ("; ".join(notes) or "model and market favour different players")
         return False, info
     info.update(best)
-    info["reason"] = "model and market agree; Hard Rock not listed at last check, bet only at the minimum price"
+    info["reason"] = "model and market agree; bet only if Hard Rock is at or above the minimum (misplaced line)"
     return True, info
 
 
