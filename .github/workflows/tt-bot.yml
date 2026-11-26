@@ -43,8 +43,9 @@ jobs:
       TTQ_JWT_SECRET: not-used-in-bot-mode
       TTQ_DASH_PASSWORD: ${{ secrets.TTQ_DASH_PASSWORD }}
       ODDSPAPI_KEY: ${{ secrets.ODDSPAPI_KEY }}          # Hard Rock + market prices (credits capped in code)
-      ODDSPAPI_DAILY_CAP: "9"          # one sweep = Hard Rock + DraftKings = 2 credits, about 4 a day
-      ODDSPAPI_SWEEP_MINUTES: "420"
+      ODDSPAPI_DAILY_CAP: "8"          # one sweep = DraftKings board for every listed match = 1 credit
+      ODDSPAPI_SWEEP_MINUTES: "200"    # about 7 sweeps a day + 1 fixture list = 8 credits/day, 240/month
+      ODDSPAPI_SWEEP_HARDROCK: "0"     # Hard Rock rarely lists TT Elite this early; you check its price in the app
       ODDSPAPI_MONTHLY_CAP: "240"
     steps:
       - uses: actions/checkout@v4
