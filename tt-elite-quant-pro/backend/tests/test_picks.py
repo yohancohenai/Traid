@@ -108,7 +108,9 @@ def test_no_market_data_means_no_pick(f, db, monkeypatch):
     _m(f, db, 30)
     _market(monkeypatch, {"status": "not in sweep"})
     r = picks_job(db)
-    assert r["sent"] == 0 and "no live market data" in r["skipped_by_market"][0]["reason"]
+    assert r["sent"] == 0 and r["skipped_by_market"] == []          # undecided: re-checked on a later run
+    from ttq.models import AppSetting
+    assert not (db.get(AppSetting, "picks_sent").value if db.get(AppSetting, "picks_sent") else {})
 
 
 def test_no_daily_cap_by_default(f, db):
@@ -170,5 +172,20 @@ def test_nothing_sent_without_a_fresh_sweep(f, db, monkeypatch):
     _m(f, db, 30)
     monkeypatch.setattr("ttq.providers.oddspapi.sweep", lambda *a, **k: {"swept": False, "why": "budget"})
     monkeypatch.setattr("ttq.providers.oddspapi.latest_sweep", lambda db: {})
+    monkeypatch.setattr("ttq.providers.oddspapi.from_sweep", lambda *a, **k: {"status": "no fresh sweep"})
     r = picks_job(db)
-    assert r["sent"] == 0 and r["checked"] == {"no_fresh_sweep": True}
+    assert r["sent"] == 0 and r["skipped_by_market"] == []
+
+
+def test_hard_rock_missing_waits_then_any_match_is_checked(f, db, monkeypatch):
+    _setup(db)
+    _m(f, db, 30, p1=0.52)                      # coin-flip by the model: still checked for a misplaced Hard Rock line
+    sent = []
+    monkeypatch.setattr("ttq.services.alerts._send_telegram", lambda t, b: sent.append(t) or True)
+    monkeypatch.setattr("ttq.services.alerts._send_email", lambda t, b: False)
+    _market(monkeypatch, {"status": "ok", "books": 1, "hard_rock": None, "consensus_p1": 0.5})
+    assert picks_job(db)["sent"] == 0 and not sent                   # not listed yet -> wait
+    # Hard Rock +120 (2.20) on a player the market makes 50% and the model 52% -> +10% vs fair
+    _market(monkeypatch, {"status": "ok", "books": 1, "hard_rock": (2.20, 1.62), "consensus_p1": 0.5})
+    r = picks_job(db)
+    assert r["sent"] == 1 and len(sent) == 1

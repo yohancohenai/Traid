@@ -215,7 +215,7 @@ def test_sweep_waits_for_budget(db, monkeypatch):
 
 
 def test_sweep_stays_usable_until_next_one_and_status(db, monkeypatch):
-    monkeypatch.setenv("ODDSPAPI_SWEEP_MINUTES", "420")
+    monkeypatch.setenv("ODDSPAPI_FRESH_MINUTES", "435")
     now = utcnow()
     op._put_row(db, "oddspapi_sweep", {"fetched_at": (now - timedelta(hours=5)).isoformat(), "books": [],
                                        "boards": {"f1": {"start": now.isoformat(), "p1": "A B", "p2": "C D",
@@ -227,7 +227,8 @@ def test_sweep_stays_usable_until_next_one_and_status(db, monkeypatch):
     assert st["matches"] == 1 and st["priced_by"] == {"hardrockbet": 1, "draftkings": 1} and st["last_sweep_min_ago"] == 480
 
 
-def test_no_hard_rock_price_falls_back_to_market_minimum():
+def test_no_hard_rock_price_falls_back_to_market_minimum(monkeypatch):
+    monkeypatch.setenv("ODDSPAPI_NO_HR_PICKS", "1")
     from ttq.odds.math import american_to_decimal
     pred = _Pred(0.38, 0.33, 0.43)                       # model: p2 62%
     # DraftKings -200 / +165 -> market p2 ~64%; blend ~63% -> need >= 1.02/0.63 = 1.62 (about -160)

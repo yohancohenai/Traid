@@ -114,7 +114,7 @@ def price_targets_job(db: Session) -> dict:
 
 
 def build_picks(db: Session, now: datetime | None = None, stats: dict | None = None,
-                max_minutes: int | None = None) -> list[dict]:
+                max_minutes: int | None = None, any_match: bool = False) -> list[dict]:
     """Strongest conditional picks for live matches starting soon. One side per match, each match once, capped per
     local day. Returns [{"match", "pred", "side", "p", "min_american"}]."""
     cfg = get_setting(db, "alerts")
@@ -123,11 +123,11 @@ def build_picks(db: Session, now: datetime | None = None, stats: dict | None = N
     now = now or utcnow()
     F = get_filters(db, False)
     lo_min, hi_min = int(cfg.get("picks_min_minutes", 10)), int(max_minutes or cfg.get("picks_max_minutes", 45))
-    max_width = float(cfg.get("picks_max_interval", 0.20))
+    max_width = 1.0 if any_match else float(cfg.get("picks_max_interval", 0.20))
     # Back-test (Nov 2026, 1,338 out-of-sample matches): the model is well calibrated for favourites at 60%+ but
     # over-confident on near coin-flips, and the HIGH-quality / narrow-range / models-agree filters did not raise the
     # hit rate. So picks are favourites at >= picks_min_prob; only LOW-quality data is excluded.
-    min_prob = float(cfg.get("picks_min_prob", 0.60))
+    min_prob = 0.0 if any_match else float(cfg.get("picks_min_prob", 0.60))
     tz = ZoneInfo(get_setting(db, "display").get("timezone") or get_settings().user_timezone)
     sent_row = db.get(AppSetting, "picks_sent")
     sent = {k: v for k, v in (sent_row.value if sent_row else {}).items()
@@ -172,6 +172,9 @@ def build_picks(db: Session, now: datetime | None = None, stats: dict | None = N
             continue
         best = None
         fav = ("p1", pred.p1_win, pred.p1_ci_low) if pred.p1_win >= 0.5 else ("p2", 1 - pred.p1_win, 1 - pred.p1_ci_high)
+        if any_match:          # market mode: Hard Rock's price decides; keep the favourite as the default side
+            cands.append((width, m, pred, (0, fav[0], fav[1], round_up_american(1 / max(fav[1], 0.01)))))
+            continue
         for side, p, lo in (fav,):
             t = side_target(p, lo, F)
             if t is None:
@@ -200,6 +203,8 @@ def build_picks(db: Session, now: datetime | None = None, stats: dict | None = N
 MARKET_DISAGREE = 0.0     # model and market must agree: at Hard Rock's price the consensus of the other books must not say -EV
 HR_OUTLIER = 0.12         # skip if Hard Rock's no-vig chance is 12+ points away from every other book (stale/void line)
 PRICE_MIN, PRICE_MAX = 1.50, 3.00   # only -200 to +200: no -500 favourites (one loss wipes out five wins)
+HR_MIN_EDGE = 0.02        # Hard Rock must pay 2%+ above the fair (no-vig) price of the sharper books
+MODEL_MAX_AGAINST = -0.03 # and our model must not say the bet is clearly -EV
 MAX_FAV_TO_CHECK = 0.80   # don't spend a credit on huge favourites: their price can't land in the band
 
 
@@ -227,8 +232,13 @@ def decide_with_market(side: str, p: float, min_american: int, mk: dict | None, 
         info["reason"] = "too few books for a fair price"
         return False, info
     F = F or {"min_ev": 0.03, "min_ev_low": 0.0}
-    if not hr:      # Hard Rock lists TT Elite late: decide on the market, send the minimum Hard Rock price to accept
-        return _decide_without_hr(p, side, pred, cons_p1, mk, F, info)
+    if not hr:
+        import os
+        if os.environ.get("ODDSPAPI_NO_HR_PICKS", "0") == "1":
+            return _decide_without_hr(p, side, pred, cons_p1, mk, F, info)
+        info["reason"] = "Hard Rock hasn't listed it yet"
+        info["hr_missing"] = True
+        return False, info
     from ttq.odds.math import decimal_to_american
     hr_novig_p1 = (1 / hr[0]) / (1 / hr[0] + 1 / hr[1])
     if abs(hr_novig_p1 - cons_p1) > HR_OUTLIER:
@@ -240,23 +250,23 @@ def decide_with_market(side: str, p: float, min_american: int, mk: dict | None, 
     for sd, mp, lo in sides:
         dec = hr[0] if sd == "p1" else hr[1]
         cons = cons_p1 if sd == "p1" else 1 - cons_p1
-        row = {"side": sd, "p": round(mp, 4), "hr_american": decimal_to_american(dec), "hr_decimal": round(dec, 3),
-               "consensus_p": round(cons, 4), "model_ev_at_hr": round(mp * dec - 1, 4),
-               "model_ev_low_at_hr": round(lo * dec - 1, 4), "market_ev_at_hr": round(cons * dec - 1, 4)}
+        pb = (mp + cons) / 2
+        row = {"side": sd, "p": round(pb, 4), "model_p": round(mp, 4), "hr_american": decimal_to_american(dec),
+               "hr_decimal": round(dec, 3), "consensus_p": round(cons, 4), "model_ev_at_hr": round(mp * dec - 1, 4),
+               "blend_ev_at_hr": round(pb * dec - 1, 4), "market_ev_at_hr": round(cons * dec - 1, 4)}
         if not (PRICE_MIN <= dec <= PRICE_MAX):
             notes.append(f"{sd} {row['hr_american']:+d} outside -200..+200")
             continue
-        if row["model_ev_at_hr"] < F["min_ev"] or row["model_ev_low_at_hr"] < F["min_ev_low"]:
-            notes.append(f"{sd} {row['hr_american']:+d}: model edge {row['model_ev_at_hr']:+.1%} too small")
+        if row["market_ev_at_hr"] < HR_MIN_EDGE:
+            notes.append(f"{sd} {row['hr_american']:+d}: only {row['market_ev_at_hr']:+.1%} vs fair {decimal_to_american(1 / cons):+d}")
             continue
-        if row["market_ev_at_hr"] < MARKET_DISAGREE:
-            notes.append(f"{sd} {row['hr_american']:+d}: other books say {row['market_ev_at_hr']:+.1%}")
+        if row["blend_ev_at_hr"] < HR_MIN_EDGE or row["model_ev_at_hr"] < MODEL_MAX_AGAINST:
+            notes.append(f"{sd} {row['hr_american']:+d}: model disagrees ({mp:.0%})")
             continue
         if best is None or row["market_ev_at_hr"] > best["market_ev_at_hr"]:
             best = row
     if best is None:
         info["reason"] = "; ".join(notes) or "no side passes"
-        # keep the favourite's numbers for the log
         sd, mp, _ = sides[0] if (pred is None or sides[0][1] >= 0.5) else sides[1]
         dec = hr[0] if sd == "p1" else hr[1]
         info.update({"side": sd, "hr_american": decimal_to_american(dec), "hr_decimal": round(dec, 3),
@@ -264,7 +274,7 @@ def decide_with_market(side: str, p: float, min_american: int, mk: dict | None, 
                      "market_ev_at_hr": round((cons_p1 if sd == "p1" else 1 - cons_p1) * dec - 1, 4)})
         return False, info
     info.update(best)
-    info["reason"] = "misplaced Hard Rock line: model and market both say +EV"
+    info["reason"] = "misplaced Hard Rock line: Hard Rock pays more than the fair price of the other books"
     return True, info
 
 
@@ -377,7 +387,8 @@ def _log_market_check(db: Session, row: dict) -> None:
     db.flush()
 
 
-SWEEP_WINDOW_MIN = 90     # after a sweep, every match starting in the next 90 min is evaluated at once
+SWEEP_WINDOW_MIN = 90
+MARKET_WINDOW_MIN = 45    # Hard Rock lists TT Elite late: matches are checked from 45 min before start
 
 
 def picks_job(db: Session) -> dict:
@@ -388,35 +399,33 @@ def picks_job(db: Session) -> dict:
     out, logged, stats, skipped, unmark = [], [], {}, [], []
     resweep_tried = False
     try:
-        swept = sweep(db)
+        swept = sweep(db)                       # background sweep (normally off: sweeps are taken when needed)
     except Exception as e:  # noqa
         swept = {"swept": False, "why": f"error {e.__class__.__name__}"}
-    sw = latest_sweep(db)
-    fresh = bool(sw.get("fetched_at")) and (utcnow() - datetime.fromisoformat(sw["fetched_at"])).total_seconds() < 60 * sweep_fresh_minutes()
-    if not fresh and not sweep(db, need=True).get("swept"):   # no live market data: nothing can be confirmed
-        return {"sent": 0, "picks": [], "skipped_by_market": [], "checked": {"no_fresh_sweep": True}, "sweep": swept}
-    for pk in build_picks(db, stats=stats, max_minutes=SWEEP_WINDOW_MIN):
+    now = utcnow()
+    for pk in build_picks(db, stats=stats, max_minutes=MARKET_WINDOW_MIN, any_match=True):
         m = pk["match"]
+        names = (m.player1.canonical_name, m.player2.canonical_name, m.scheduled_at)
         try:
-            mk = from_sweep(db, m.player1.canonical_name, m.player2.canonical_name, m.scheduled_at)
-            if mk.get("status") in ("not in sweep", "no fresh sweep") and not resweep_tried:
-                resweep_tried = True                      # the books list matches ~2 h ahead: fetch a newer board
+            mk = from_sweep(db, *names)
+            if (mk.get("status") != "ok" or not mk.get("hard_rock")) and not resweep_tried:
+                resweep_tried = True            # fresh Hard Rock + DraftKings boards for everything starting soon
                 r = sweep(db, need=True)
                 if r.get("swept"):
                     swept = r
-                    mk = from_sweep(db, m.player1.canonical_name, m.player2.canonical_name, m.scheduled_at)
+                    mk = from_sweep(db, *names)
         except Exception:  # noqa
             mk = {"status": "error"}
         send, info = decide_with_market(pk["side"], pk["p"], pk["min_american"], mk, pk["pred"], get_filters(db, False))
-        if info.get("market") in ("no fresh sweep", "not in sweep", "error"):
-            unmark.append(m.id)             # nothing decided: look again when the next sweep arrives
+        mins_left = (as_utc(m.scheduled_at) - now).total_seconds() / 60
+        if (info.get("market") in ("no fresh sweep", "not in sweep", "error") or info.get("hr_missing")) and mins_left > 12:
+            unmark.append(m.id)             # nothing decided yet: look again on a later run / sweep
+            continue
         if send and info.get("hr_listed") is False:
             pk = {**pk, "side": info["side"], "p": info["p"], "min_american": info["min_american"]}
-        elif send and info.get("side") and info["side"] != pk["side"]:      # the market made the other side the play
-            pk = {**pk, "side": info["side"], "p": info["p"]}
-            t = side_target(info["p"], (pk["pred"].p1_ci_low if info["side"] == "p1" else 1 - pk["pred"].p1_ci_high),
-                            get_filters(db, False))
-            pk["min_american"] = round_up_american(t) if t else info["hr_american"]
+        elif send:          # real Hard Rock line: the floor is the lowest price still 2%+ above the market's fair price
+            pk = {**pk, "side": info["side"], "p": info["p"],
+                  "min_american": round_up_american((1 + HR_MIN_EDGE) / info["consensus_p"])}
         info["units"] = suggested_units(db, info.get("market_ev_at_hr"), info.get("hr_decimal"))
         name = m.player1.canonical_name if pk["side"] == "p1" else m.player2.canonical_name
         _log_market_check(db, {"at": utcnow().isoformat(), "match_id": m.id, "match": f"{m.player1.canonical_name} vs "

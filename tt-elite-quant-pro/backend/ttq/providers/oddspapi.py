@@ -234,7 +234,8 @@ def sweep_minutes() -> int:
 
 
 def sweep_fresh_minutes() -> int:
-    return sweep_minutes() + 15
+    """How long a board counts as live prices (Hard Rock moves; keep it short)."""
+    return int(os.environ.get("ODDSPAPI_FRESH_MINUTES", "50"))
 
 
 def sweep_status(db: Session, now: datetime | None = None) -> dict:
@@ -263,7 +264,7 @@ def latest_sweep(db: Session) -> dict:
     return _get_row(db, "oddspapi_sweep")
 
 
-NEED_GAP_MIN = 40   # a pick candidate missing from the last sweep triggers a new one, at most this often
+NEED_GAP_MIN = int(os.environ.get("ODDSPAPI_NEED_GAP_MINUTES", "45"))   # a pick candidate missing from the last sweep triggers a new one, at most this often
 
 
 def sweep(db: Session, now: datetime | None = None, force: bool = False, need: bool = False) -> dict:
