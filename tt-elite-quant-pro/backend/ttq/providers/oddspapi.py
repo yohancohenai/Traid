@@ -67,10 +67,11 @@ def usage(db: Session, now: datetime | None = None) -> dict:
 
 
 def paced_allowance(d_cap: int, now: datetime) -> int:
-    """Spread the daily credits over the day: by hour h at most ceil(cap * (h + 3) / 24) may be used."""
+    """Spread the daily credits over the day: by hour h at most ceil(cap * (h + 6) / 24) may be used, so a
+    2-credit Hard Rock + DraftKings check is always possible from midnight UTC."""
     import math
     hours = now.hour + now.minute / 60
-    return min(d_cap, math.ceil(d_cap * (hours + 3) / 24))
+    return min(d_cap, math.ceil(d_cap * (hours + 6) / 24))
 
 
 def can_spend(db: Session, n: int = 1, now: datetime | None = None) -> bool:

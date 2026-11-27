@@ -154,7 +154,7 @@ def test_market_must_not_say_negative_ev():
 def test_credits_are_paced_through_the_day():
     from datetime import datetime, timezone
     at = lambda h: datetime(2026, 11, 25, h, tzinfo=timezone.utc)
-    assert op.paced_allowance(7, at(0)) == 1 and op.paced_allowance(7, at(9)) == 4 and op.paced_allowance(7, at(23)) == 7
+    assert op.paced_allowance(8, at(0)) == 2 and op.paced_allowance(8, at(9)) == 5 and op.paced_allowance(8, at(23)) == 8
 
 
 def test_cached_fixture_list_costs_nothing(db, monkeypatch):
