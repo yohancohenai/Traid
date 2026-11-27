@@ -43,9 +43,10 @@ jobs:
       TTQ_JWT_SECRET: not-used-in-bot-mode
       TTQ_DASH_PASSWORD: ${{ secrets.TTQ_DASH_PASSWORD }}
       ODDSPAPI_KEY: ${{ secrets.ODDSPAPI_KEY }}          # Hard Rock + market prices (credits capped in code)
-      ODDSPAPI_DAILY_CAP: "8"          # one sweep = Hard Rock + DraftKings boards = 2 credits
+      ODDSPAPI_DAILY_CAP: "8"          # one sweep = DraftKings board = 1 credit
       ODDSPAPI_SWEEP_MINUTES: "100000" # no blind sweeps: a sweep is taken only when matches start within 45 min
-      ODDSPAPI_SWEEP_HARDROCK: "1"     # real Hard Rock prices for every match it lists, vs DraftKings' fair price
+      ODDSPAPI_SWEEP_HARDROCK: "0"     # OddsPapi carried no Hard Rock TT prices on 3 of 4 checks: credits wasted
+      ODDSPAPI_NO_HR_PICKS: "1"        # pick = model+DraftKings agree; message gives the minimum Hard Rock price
       ODDSPAPI_NEED_GAP_MINUTES: "45"
       ODDSPAPI_MONTHLY_CAP: "240"
     steps:
