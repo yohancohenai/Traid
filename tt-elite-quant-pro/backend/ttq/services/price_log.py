@@ -24,7 +24,8 @@ log = logging.getLogger(__name__)
 
 HELP = ("To log a Hard Rock price, reply to the pick message with:\n"
         "+110  (price you see)\nbet +110  (you placed it)\nskip  (not offered / skipped)\n"
-        "or a screenshot of the Hard Rock match (add the caption 'bet' if you placed it)")
+        "or a screenshot of the Hard Rock match (add the caption 'bet' if you placed it).\n"
+        "To find misplaced lines: send a screenshot of the Hard Rock table tennis list (not as a reply).")
 
 _SKIP = {"skip", "no", "gone", "pass", "not offered", "none", "n/a"}
 _BET = re.compile(r"^(bet|took|placed|in)\b", re.I)
@@ -145,6 +146,17 @@ def _photo_reply(db: Session, msg: dict, reply_to_id: int) -> str:
     return "From your screenshot: " + apply_reply(db, reply_to_id, ("bet " if _BET.match(caption) else "") + f"{am:+d}")
 
 
+def _scan_reply(db: Session, msg: dict) -> str:
+    from ttq.services.hr_scan import scan_image, send_value_picks, summary_text
+    try:
+        res = scan_image(db, _download_photo(msg))
+    except Exception as e:  # noqa
+        log.warning("hard rock scan failed: %s", e.__class__.__name__)
+        return "I couldn't read that screenshot. Try a clearer one of the Hard Rock table tennis list."
+    send_value_picks(db, res)
+    return summary_text(res)
+
+
 def poll_replies(db: Session) -> dict:
     """Read new Telegram messages, log replies to picks, confirm each one. Safe to call every minute."""
     s = get_settings()
@@ -168,6 +180,8 @@ def poll_replies(db: Session) -> dict:
         if rt and msg.get("photo"):
             answer = _photo_reply(db, msg, rt)
             logged += "logged" in answer.lower() and "couldn" not in answer.lower()
+        elif msg.get("photo"):              # a Hard Rock screenshot on its own: scan it for misplaced lines
+            answer = _scan_reply(db, msg)
         elif rt:
             answer = apply_reply(db, rt, text)
             logged += answer.startswith(("Logged", "Bet logged", "Price logged"))
