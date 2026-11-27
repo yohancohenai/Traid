@@ -87,4 +87,11 @@ def cloud_cycle(window_minutes: int = 35, min_minutes: int = 10, hold_minutes: f
         from ttq.providers.oddspapi import sweep_status
         return sweep_status(db)
     out["market"] = jobs.run_job("market_status", market)
+
+    def db_size(db):
+        from sqlalchemy import text
+        rows = db.execute(text("SELECT relname, pg_total_relation_size(relid) FROM pg_catalog.pg_statio_user_tables "
+                               "ORDER BY 2 DESC LIMIT 6")).all()
+        return {r[0]: f"{r[1] / 1e6:.0f} MB" for r in rows}
+    out["db_size"] = jobs.run_job("db_size", db_size)
     return out

@@ -251,8 +251,9 @@ def sweep_status(db: Session, now: datetime | None = None) -> dict:
     checks = (_get_row(db, "market_checks").get("items") or [])[-6:]
     recent = [{"at": c.get("at", "")[11:16], "match": c.get("match"), "pick": c.get("pick"), "sent": c.get("sent"),
                "reason": c.get("reason")} for c in checks]
+    cov = (_get_row(db, "oddspapi_coverage").get("items") or [])[-4:]
     return {"last_sweep_min_ago": age, "matches": len(sw.get("boards", {})), "priced_by": per_book,
-            "usage": usage(db, now), "recent_market_checks": recent}
+            "usage": usage(db, now), "recent_market_checks": recent, "coverage": cov}
 
 
 def fair_p1(pairs: dict[str, tuple[float, float]], books: list[str]) -> tuple[float | None, int]:
@@ -279,8 +280,11 @@ def sweep(db: Session, now: datetime | None = None, force: bool = False, need: b
     if not force and last.get("fetched_at") and \
             now - datetime.fromisoformat(last["fetched_at"]) < timedelta(minutes=gap):
         return {"swept": False, "why": "not due"}
-    # Hard Rock lists TT Elite late, so on a small plan its credit is better spent on more frequent market sweeps
-    books = ([HARD_ROCK] if os.environ.get("ODDSPAPI_SWEEP_HARDROCK", "1") == "1" else []) + ref_books()
+    # Hard Rock coverage of TT Elite on OddsPapi is patchy: "alt" adds it on every other sweep to measure when (how
+    # long before start) Hard Rock prices appear, without halving the number of market sweeps.
+    mode = os.environ.get("ODDSPAPI_SWEEP_HARDROCK", "1")
+    with_hr = mode == "1" or (mode == "alt" and HARD_ROCK not in (last.get("books") or []))
+    books = ([HARD_ROCK] if with_hr else []) + ref_books()
     cache = _get_row(db, "oddspapi_fixtures")
     fx_fresh = cache.get("fetched_at") and now - datetime.fromisoformat(cache["fetched_at"]) < FIXTURE_REFRESH
     cost = len(books) + (0 if fx_fresh else 1)
@@ -289,10 +293,12 @@ def sweep(db: Session, now: datetime | None = None, force: bool = False, need: b
     names = {f["fixtureId"]: f for f in fixtures(db, now + timedelta(hours=2), now)} if not fx_fresh else \
         {f["fixtureId"]: f for f in cache.get("fixtures", [])}
     boards: dict[str, dict] = {}
+    returned: dict[str, int] = {}
     for i, slug in enumerate(books):
         if i:
             time.sleep(1.2)                       # endpoint rate limit: 1 call per second
         data = _request(db, "odds-by-tournaments", now, tournamentIds=str(TT_ELITE_TOURNAMENT), bookmaker=slug)
+        returned[slug] = len(data or [])
         for f in data or []:
             if f.get("statusId", 0) != 0:          # only matches that haven't started
                 continue
@@ -305,8 +311,27 @@ def sweep(db: Session, now: datetime | None = None, force: bool = False, need: b
                                         "p2": meta.get("participant2Name", ""), "books": {}})
             b["books"][slug] = list(pr)
     _put_row(db, "oddspapi_sweep", {"fetched_at": now.isoformat(), "boards": boards, "books": books})
-    with_hr = sum(1 for b in boards.values() if HARD_ROCK in b["books"])
-    return {"swept": True, "matches": len(boards), "with_hard_rock": with_hr, "credits": cost}
+    n_hr = sum(1 for b in boards.values() if HARD_ROCK in b["books"])
+    _log_coverage(db, now, books, returned, boards)
+    return {"swept": True, "matches": len(boards), "with_hard_rock": n_hr, "credits": cost}
+
+
+def _lead(b: dict, now: datetime) -> int | None:
+    try:
+        return round((datetime.fromisoformat(b["start"].replace("Z", "+00:00")) - now).total_seconds() / 60)
+    except Exception:  # noqa
+        return None
+
+
+def _log_coverage(db: Session, now: datetime, books: list[str], returned: dict, boards: dict) -> None:
+    """Which books priced which matches, by minutes before start: tells when Hard Rock's TT lines appear."""
+    entry = {"at": now.isoformat()[:16], "books": books, "returned": returned,
+             "priced": {s: sum(1 for b in boards.values() if s in b["books"]) for s in books}}
+    for s in books:
+        leads = sorted(x for x in (_lead(b, now) for b in boards.values() if s in b["books"]) if x is not None)
+        entry[f"{s}_leads"] = leads[:40]
+    items = (_get_row(db, "oddspapi_coverage").get("items") or [])[-199:] + [entry]
+    _put_row(db, "oddspapi_coverage", {"items": items})
 
 
 def from_sweep(db: Session, p1_name: str, p2_name: str, start: datetime, now: datetime | None = None,

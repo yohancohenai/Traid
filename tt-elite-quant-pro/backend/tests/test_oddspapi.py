@@ -255,3 +255,22 @@ def test_need_triggers_early_sweep(db, monkeypatch):
     assert op.sweep(db, now)["why"] == "not due"                            # background schedule not due
     monkeypatch.setattr(op, "can_spend", lambda db, cost, now: False)
     assert op.sweep(db, now, need=True)["why"].startswith("budget")         # a candidate needs it: due, budget decides
+
+
+def test_alt_mode_alternates_hard_rock_and_logs_coverage(db, monkeypatch):
+    monkeypatch.setenv("ODDSPAPI_KEY", "k")
+    monkeypatch.setenv("ODDSPAPI_SWEEP_HARDROCK", "alt")
+    monkeypatch.setattr(op, "paced_allowance", lambda cap, now: cap)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    op._put_row(db, "oddspapi_fixtures", {"fetched_at": utcnow().isoformat(), "fixtures": []})
+    st = (utcnow() + timedelta(minutes=20)).isoformat()
+    class R:
+        status_code = 200
+        def __init__(self, slug): self.slug = slug
+        def json(self):
+            return [{"fixtureId": "f1", "startTime": st, "statusId": 0, "bookmakerOdds": {self.slug: _book(1.8, 2.0)}}]
+    monkeypatch.setattr(op.httpx, "get", lambda url, params=None, **k: R(params["bookmaker"]))
+    assert op.sweep(db, force=True)["with_hard_rock"] == 1
+    assert op.sweep(db, force=True)["with_hard_rock"] == 0          # next sweep skips Hard Rock
+    cov = op._get_row(db, "oddspapi_coverage")["items"]
+    assert cov[0]["priced"]["hardrockbet"] == 1 and 19 <= cov[0]["hardrockbet_leads"][0] <= 20
