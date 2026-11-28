@@ -16,7 +16,7 @@ import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, delete, exists, func, select
+from sqlalchemy import and_, delete, exists, func, select, update
 from sqlalchemy.orm import Session
 
 from ttq.core.config import get_settings
@@ -90,7 +90,12 @@ def prune(db: Session, keep_days: int = 2, keep_pred_hours: int = 6) -> dict:
     raw = db.execute(delete(RawObservation).where(
         RawObservation.fetched_at < utcnow() - timedelta(hours=12),     # raw logs are only for short-term audit
         ~exists().where(OddsQuote.raw_observation_id == RawObservation.id)).execution_options(synchronize_session=False))
-    return {"recommendations_deleted": r.rowcount, "predictions_deleted": p.rowcount, "raw_deleted": raw.rowcount}
+    # The feature snapshot (large JSON) is only needed before a match; learning uses the probability alone.
+    fin = select(Match.id).where(Match.status != "SCHEDULED", Match.scheduled_at < utcnow() - timedelta(hours=12))
+    slim = db.execute(update(Prediction).where(Prediction.match_id.in_(fin), Prediction.features != {})
+                      .values(features={}, scorelines={}).execution_options(synchronize_session=False))
+    return {"recommendations_deleted": r.rowcount, "predictions_deleted": p.rowcount, "raw_deleted": raw.rowcount,
+            "predictions_slimmed": slim.rowcount}
 
 
 def daily_self_check(db: Session, now: datetime | None = None, force: bool = False) -> dict:

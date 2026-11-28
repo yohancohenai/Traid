@@ -58,3 +58,19 @@ def test_prune_keeps_latest_and_backtest(f, db):
     left = db.query(Prediction).filter_by(match_id=m.id).all()
     assert r["predictions_deleted"] == 2 and len(left) == 2
     assert any(p.is_backtest for p in left) and any(abs(p.p1_win - 0.62) < 1e-9 for p in left)
+
+
+def test_prune_slims_finished_match_features(f, db):
+    from datetime import timedelta
+    from ttq.core.timeutil import utcnow
+    from ttq.models import Prediction
+    a, b = f.player(), f.player()
+    m = f.match(a, b, at=utcnow() - timedelta(days=1))
+    m.status = "FINISHED"
+    f.prediction(m, p1=0.6, lo=0.55, hi=0.65)
+    pr = db.query(Prediction).filter_by(match_id=m.id).one()
+    pr.features = {"x": 1}
+    db.flush()
+    assert prune(db)["predictions_slimmed"] == 1
+    db.refresh(pr)
+    assert pr.features == {} and pr.p1_win == 0.6
