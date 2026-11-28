@@ -74,3 +74,20 @@ def test_prune_slims_finished_match_features(f, db):
     assert prune(db)["predictions_slimmed"] == 1
     db.refresh(pr)
     assert pr.features == {} and pr.p1_win == 0.6
+
+
+def test_prune_artifacts_keeps_champion_and_latest(db, tmp_path, monkeypatch):
+    from ttq.core.config import get_settings
+    from ttq.models import ModelVersion
+    from ttq.services.learning import prune_artifacts
+    monkeypatch.setattr(get_settings(), "artifacts_dir", str(tmp_path))
+    paths = []
+    for i, st in enumerate(["CHAMPION", "CANDIDATE", "CANDIDATE", "CANDIDATE", "CANDIDATE"]):
+        p = tmp_path / f"run_live_2026010{i}.joblib"
+        p.write_bytes(b"x")
+        paths.append(p)
+        db.add(ModelVersion(name="m", kind="k", version=f"2026010{i}", status=st, params={}, features=[], metrics={},
+                            splits={}, artifact_path=str(p), is_demo=False))
+    db.flush()
+    assert prune_artifacts(db) == 2
+    assert [p.exists() for p in paths] == [True, False, False, True, True]

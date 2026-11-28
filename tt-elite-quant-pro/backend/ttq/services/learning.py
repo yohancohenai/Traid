@@ -95,7 +95,26 @@ def prune(db: Session, keep_days: int = 2, keep_pred_hours: int = 6) -> dict:
     slim = db.execute(update(Prediction).where(Prediction.match_id.in_(fin), Prediction.features != {})
                       .values(features={}, scorelines={}).execution_options(synchronize_session=False))
     return {"recommendations_deleted": r.rowcount, "predictions_deleted": p.rowcount, "raw_deleted": raw.rowcount,
-            "predictions_slimmed": slim.rowcount}
+            "predictions_slimmed": slim.rowcount, "artifacts_deleted": prune_artifacts(db)}
+
+
+def prune_artifacts(db: Session, keep_latest: int = 2) -> int:
+    """Each retrain saves every candidate model (several MB); keep the champion's file and the latest few."""
+    import glob
+    import os
+    from ttq.models import ModelVersion
+    rows = db.execute(select(ModelVersion.artifact_path, ModelVersion.status, ModelVersion.version)).all()
+    keep = {p for p, st, _ in rows if p and st == "CHAMPION"}
+    keep |= {p for p, _, _ in sorted({(p, "", v) for p, _, v in rows if p}, key=lambda x: x[2])[-keep_latest:]}
+    n = 0
+    for f in glob.glob(os.path.join(get_settings().artifacts_dir, "run_*.joblib")):
+        if f not in keep and os.path.abspath(f) not in {os.path.abspath(k) for k in keep}:
+            try:
+                os.remove(f)
+                n += 1
+            except OSError:
+                pass
+    return n
 
 
 def daily_self_check(db: Session, now: datetime | None = None, force: bool = False) -> dict:
