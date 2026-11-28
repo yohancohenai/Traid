@@ -74,7 +74,7 @@ def choose_threshold(table: list[dict], current: float) -> tuple[float, str]:
     return new, f"threshold {current:.0%} -> {new:.0%} ({why})"
 
 
-def prune(db: Session, keep_days: int = 2) -> dict:
+def prune(db: Session, keep_days: int = 2, keep_pred_hours: int = 6) -> dict:
     """Delete superseded recommendations and predictions older than `keep_days` that nothing else needs: keeps the
     latest prediction per match, every back-test prediction, and anything a bet or recommendation still points to."""
     cutoff = utcnow() - timedelta(days=keep_days)
@@ -83,8 +83,8 @@ def prune(db: Session, keep_days: int = 2) -> dict:
         ~exists().where(Bet.recommendation_id == Recommendation.id)).execution_options(synchronize_session=False))
     latest = (select(Prediction.match_id, func.max(Prediction.as_of).label("mx"))
               .where(Prediction.is_backtest.is_(False)).group_by(Prediction.match_id).subquery())
-    p = db.execute(delete(Prediction).where(
-        Prediction.is_backtest.is_(False), Prediction.created_at < cutoff,
+    p = db.execute(delete(Prediction).where(       # superseded predictions are only needed briefly
+        Prediction.is_backtest.is_(False), Prediction.created_at < utcnow() - timedelta(hours=keep_pred_hours),
         ~exists().where(and_(latest.c.match_id == Prediction.match_id, latest.c.mx == Prediction.as_of)),
         ~exists().where(Recommendation.prediction_id == Prediction.id)).execution_options(synchronize_session=False))
     raw = db.execute(delete(RawObservation).where(

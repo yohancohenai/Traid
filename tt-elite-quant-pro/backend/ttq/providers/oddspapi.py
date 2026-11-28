@@ -292,7 +292,7 @@ def sweep(db: Session, now: datetime | None = None, force: bool = False, need: b
     fx_fresh = cache.get("fetched_at") and now - datetime.fromisoformat(cache["fetched_at"]) < FIXTURE_REFRESH
     cost = len(books) + (0 if fx_fresh else 1)
     reserve = int(os.environ.get("ODDSPAPI_VERIFY_RESERVE", "0")) if need else 0
-    if not can_spend(db, cost + reserve, now):
+    if not can_spend(db, cost, now) or usage(db, now)["today"] + cost + reserve > caps()[0]:
         return {"swept": False, "why": f"budget (needs {cost}, keeping {reserve} for Hard Rock checks)"}
     names = {f["fixtureId"]: f for f in fixtures(db, now + timedelta(hours=2), now)} if not fx_fresh else \
         {f["fixtureId"]: f for f in cache.get("fixtures", [])}
