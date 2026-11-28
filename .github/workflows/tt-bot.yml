@@ -49,7 +49,7 @@ jobs:
       ODDSPAPI_NO_HR_PICKS: "1"        # step 1: model + DraftKings pre-qualify a match (1 credit covers all matches)
       ODDSPAPI_VERIFY_HR: "1"          # step 2: ~25 min before start, read that match's live board incl. Hard Rock
       ODDSPAPI_VERIFY_LEAD_MINUTES: "25"  #         (1 credit); send only if Hard Rock's real price is mispriced
-      ODDSPAPI_VERIFY_RESERVE: "3"     # sweeps always leave 3 credits for those Hard Rock checks
+      ODDSPAPI_VERIFY_RESERVE: "1"     # sweeps always leave 1 credit for a Hard Rock check
       ODDSPAPI_NEED_GAP_MINUTES: "60"
       ODDSPAPI_MONTHLY_CAP: "240"
     steps:
