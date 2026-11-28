@@ -78,8 +78,8 @@ def prune(db: Session, keep_days: int = 2, keep_pred_hours: int = 6) -> dict:
     """Delete superseded recommendations and predictions older than `keep_days` that nothing else needs: keeps the
     latest prediction per match, every back-test prediction, and anything a bet or recommendation still points to."""
     cutoff = utcnow() - timedelta(days=keep_days)
-    r = db.execute(delete(Recommendation).where(
-        Recommendation.is_current.is_(False), Recommendation.created_at < cutoff,
+    r = db.execute(delete(Recommendation).where(    # superseded scan results hold old predictions alive
+        Recommendation.is_current.is_(False), Recommendation.created_at < utcnow() - timedelta(hours=keep_pred_hours),
         ~exists().where(Bet.recommendation_id == Recommendation.id)).execution_options(synchronize_session=False))
     latest = (select(Prediction.match_id, func.max(Prediction.as_of).label("mx"))
               .where(Prediction.is_backtest.is_(False)).group_by(Prediction.match_id).subquery())
@@ -144,7 +144,7 @@ def daily_self_check(db: Session, now: datetime | None = None, force: bool = Fal
     return {"ran": True, **entry}
 
 
-def prune_if_due(db: Session, hours: int = 6) -> dict:
+def prune_if_due(db: Session, hours: int = 3) -> dict:
     """Housekeeping every few hours (the database is saved and restored on every bot run, so it must stay small)."""
     now = utcnow()
     row = db.get(AppSetting, "prune_last")
