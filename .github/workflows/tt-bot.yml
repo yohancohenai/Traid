@@ -109,7 +109,7 @@ jobs:
         if: always()
         run: |
           docker exec ${{ job.services.postgres.id }} pg_dump -U ttq -Fc ttq > state/db.dump
-          du -sh state
+          du -sh state state/db.dump state/artifacts
 
       - name: Save bot memory
         if: always()
