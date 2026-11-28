@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0b1020">
+<title>TT Elite Quant Pro</title>
+<style>
+:root {
+  --bg: #0b1020; --panel: #111827; --panel2: #0f172a; --line: #1f2a3c; --line2: #2a3850;
+  --ink: #e5e9f0; --sub: #94a3b8; --dim: #64748b; --accent: #38bdf8; --series: #2b8fd6;
+  --pos: #22c55e; --neg: #ef4444; --warn: #f59e0b; --chip: #172033;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f6fa; --panel: #ffffff; --panel2: #f8fafc; --line: #e3e8ef; --line2: #d5dce6;
+    --ink: #0f172a; --sub: #475569; --dim: #64748b; --accent: #0369a1; --series: #0284c7;
+    --pos: #15803d; --neg: #b91c1c; --warn: #b45309; --chip: #eef2f7;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); }
+body { font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+       -webkit-font-smoothing: antialiased; }
+.num { font-variant-numeric: tabular-nums; }
+header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent);
+         backdrop-filter: blur(6px); border-bottom: 1px solid var(--line); }
+.hbar { max-width: 1180px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 12px; }
+.logo { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), #6366f1);
+        display: grid; place-items: center; font-weight: 800; font-size: 12px; color: #0b1020; flex: none; }
+.brand { font-weight: 700; letter-spacing: .01em; }
+.brand small { display: block; font-weight: 400; color: var(--sub); font-size: 12px; }
+.live { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--sub); font-size: 12px; white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pos); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pos) 25%, transparent); }
+main { max-width: 1180px; margin: 0 auto; padding: 16px; }
+.grid { display: grid; gap: 12px; }
+.kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.two { grid-template-columns: 1fr; }
+@media (min-width: 860px) { .two { grid-template-columns: 1fr 1fr; } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-width: 0; }
+.card h3 { margin: 0 0 10px; font-size: 11px; font-weight: 600; color: var(--sub); text-transform: uppercase; letter-spacing: .06em;
+           display: flex; justify-content: space-between; gap: 8px; }
+.card h3 span { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--dim); }
+.kpi .k { font-size: 11px; color: var(--sub); text-transform: uppercase; letter-spacing: .05em; }
+.kpi .v { font-size: 26px; font-weight: 700; margin-top: 4px; line-height: 1.1; }
+.kpi .s { font-size: 12px; color: var(--dim); margin-top: 4px; }
+.pos { color: var(--pos); } .neg { color: var(--neg); } .muted { color: var(--sub); }
+section { margin-top: 12px; }
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -14px; padding: 0 14px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-weight: 500; color: var(--sub); font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+     padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 8px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+td.r, th.r { text-align: right; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+        background: var(--chip); color: var(--sub); border: 1px solid var(--line2); }
+.chip.won { color: var(--pos); border-color: color-mix(in srgb, var(--pos) 40%, transparent); }
+.chip.lost { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 40%, transparent); }
+.chip.pass { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.form { display: inline-flex; gap: 3px; }
+.form b { width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; font-size: 10px; color: #fff; }
+.form b.W { background: var(--pos); } .form b.L { background: var(--neg); }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: 220px; }
+.tip { position: absolute; pointer-events: none; background: var(--panel2); border: 1px solid var(--line2); border-radius: 8px;
+       padding: 6px 8px; font-size: 12px; white-space: nowrap; transform: translate(-50%, -110%); display: none; }
+.empty { color: var(--sub); padding: 18px 4px; text-align: center; }
+.bar { height: 8px; border-radius: 4px; background: var(--chip); overflow: hidden; margin-top: 6px; }
+.bar i { display: block; height: 100%; background: var(--series); border-radius: 4px; }
+.split { display: grid; gap: 14px; }
+.split .row { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.foot { color: var(--dim); font-size: 12px; margin: 18px 0 8px; line-height: 1.6; }
+a.link { color: var(--accent); cursor: pointer; text-decoration: none; }
+/* login */
+.login { max-width: 360px; margin: 14vh auto 0; }
+.login input { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line2); background: var(--panel2);
+               color: var(--ink); font-size: 16px; margin: 12px 0; outline: none; }
+.login input:focus { border-color: var(--accent); }
+.login button { width: 100%; padding: 10px; border: 0; border-radius: 8px; background: var(--accent); color: #0b1020;
+                font-size: 14px; font-weight: 700; cursor: pointer; }
+.err { color: var(--neg); font-size: 13px; min-height: 18px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <main>
+    <form class="card login" id="login">
+      <div style="display:flex;gap:10px;align-items:center"><div class="logo">TT</div>
+        <div class="brand">TT Elite Quant Pro<small>Private dashboard</small></div></div>
+      <input id="pw" type="password" autocomplete="current-password" placeholder="Password" autofocus>
+      <button type="submit">Open dashboard</button>
+      <div class="err" id="err"></div>
+    </form>
+  </main>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const am = v => v == null ? "–" : (v > 0 ? "+" + v : String(v));
+const pct = (v, d = 0) => v == null ? "–" : (v * 100).toFixed(d) + "%";
+const sgn = (v, d = 2) => v == null ? "–" : (v > 0 ? "+" : "") + v.toFixed(d);
+const cls = v => v == null || v === 0 ? "" : v > 0 ? "pos" : "neg";
+
+async function decrypt(blob, pw) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey({name: "PBKDF2", salt: b64(blob.salt), iterations: blob.iter, hash: "SHA-256"},
+                                            base, {name: "AES-GCM", length: 256}, false, ["decrypt"]);
+  const pt = await crypto.subtle.decrypt({name: "AES-GCM", iv: b64(blob.iv)}, key, b64(blob.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+function kpi(k, v, s, c = "") {
+  return `<div class="card kpi"><div class="k">${k}</div><div class="v num ${c}">${v}</div><div class="s">${s}</div></div>`;
+}
+
+function curveChart(curve) {
+  if (curve.length < 2) return `<div class="empty">The chart appears after 2 settled picks.</div>`;
+  const W = Math.max(300, Math.min(1148, (document.documentElement.clientWidth || 800) - 64)), H = 220, P = {l: 40, r: 12, t: 12, b: 24};
+  const ys = curve.map(c => c.units).concat([0]);
+  let lo = Math.min(...ys), hi = Math.max(...ys);
+  const pad = Math.max(0.5, (hi - lo) * 0.12); lo -= pad; hi += pad;
+  const x = i => P.l + (i / (curve.length - 1)) * (W - P.l - P.r);
+  const y = v => P.t + (1 - (v - lo) / (hi - lo)) * (H - P.t - P.b);
+  const ticks = []; const step = Math.max(0.5, Math.ceil((hi - lo) / 4 * 2) / 2);
+  for (let t = Math.ceil(lo / step) * step; t <= hi; t += step) ticks.push(+t.toFixed(2));
+  const pts = curve.map((c, i) => `${x(i).toFixed(1)},${y(c.units).toFixed(1)}`).join(" ");
+  const last = curve[curve.length - 1];
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cumulative units after each settled pick">
+    ${ticks.map(t => `<line x1="${P.l}" x2="${W - P.r}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke"/>
+      <text x="${P.l - 6}" y="${y(t) + 4}" text-anchor="end" font-size="11" fill="var(--dim)">${t > 0 ? "+" : ""}${t}</text>`).join("")}
+    <line x1="${P.l}" x2="${W - P.r}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line2)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+    <polyline points="${pts}" fill="none" stroke="var(--series)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+    <line id="xh" y1="${P.t}" y2="${H - P.b}" stroke="var(--sub)" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke" style="display:none"/>
+    <circle id="hd" r="4.5" fill="var(--series)" stroke="var(--panel)" stroke-width="2" style="display:none"/>
+    <text x="${W - P.r}" y="${H - 6}" text-anchor="end" font-size="11" fill="var(--dim)">pick #${curve.length}</text>
+    <text x="${P.l}" y="${H - 6}" font-size="11" fill="var(--dim)">pick #1</text>
+    <rect id="hit" x="${P.l}" y="0" width="${W - P.l - P.r}" height="${H}" fill="transparent"/>
+  </svg><div class="tip" id="tip"></div>
+  <script type="application/json" id="curve">${JSON.stringify({curve, W, P, lo, hi, H})}<\/script>`;
+}
+
+function wireChart() {
+  const svg = document.querySelector(".chart svg"), dataEl = $("#curve");
+  if (!svg || !dataEl) return;
+  const {curve, W, P, lo, hi, H} = JSON.parse(dataEl.textContent);
+  const tip = $("#tip"), xh = $("#xh"), hd = $("#hd");
+  const move = ev => {
+    const r = svg.getBoundingClientRect();
+    const px = ((ev.touches ? ev.touches[0].clientX : ev.clientX) - r.left) / r.width * W;
+    const i = Math.max(0, Math.min(curve.length - 1, Math.round((px - P.l) / (W - P.l - P.r) * (curve.length - 1))));
+    const c = curve[i], X = P.l + (i / (curve.length - 1)) * (W - P.l - P.r), Y = P.t + (1 - (c.units - lo) / (hi - lo)) * (H - P.t - P.b);
+    xh.setAttribute("x1", X); xh.setAttribute("x2", X); xh.style.display = "";
+    hd.setAttribute("cx", X); hd.setAttribute("cy", Y); hd.style.display = "";
+    tip.style.display = "block"; tip.style.left = (X / W * r.width) + "px"; tip.style.top = (Y / H * r.height) + "px";
+    tip.innerHTML = `<b class="num ${cls(c.units)}">${sgn(c.units)}u</b> after pick #${c.i}<br><span class="muted">${esc(c.label)} · ${esc(c.time)}</span>`;
+  };
+  const hide = () => { tip.style.display = xh.style.display = hd.style.display = "none"; };
+  svg.addEventListener("mousemove", move); svg.addEventListener("touchmove", move, {passive: true});
+  svg.addEventListener("mouseleave", hide); svg.addEventListener("touchend", hide);
+}
+
+function render(d) {
+  const s = d.stats, r = d.record, bn = r.bw + r.bl;
+  const head = `<header><div class="hbar"><div class="logo">TT</div>
+      <div class="brand">TT Elite Quant Pro<small>Hard Rock · TT Elite Series</small></div>
+      <div class="live"><span class="dot"></span>Updated ${esc(d.updated)} ET</div></div></header>`;
+  const kpis = `<div class="grid kpis">
+    ${kpi("Hit rate", pct(s.hit_rate), s.settled ? `${s.wins} of ${s.settled} picks won` : "No settled picks yet")}
+    ${kpi("Model expected", pct(s.expected_hit_rate), "Average win chance of those picks")}
+    ${kpi("Units", s.settled ? sgn(s.units) : "–", "1 unit per pick at its minimum price", cls(s.units))}
+    ${kpi("ROI", s.roi == null ? "–" : sgn(s.roi * 100, 1) + "%", s.settled ? `over ${s.settled} settled picks` : "–", cls(s.roi))}
+    ${kpi("Record", s.settled ? `${s.wins}-${s.losses}` : "–", `${s.pending} pending · ${s.voids} void`)}
+    ${kpi("Beat the close (CLV)", s.clv_n ? sgn(s.clv_avg * 100, 1) + "%" : "–", s.clv_n ? `${s.clv_beat} of ${s.clv_n} picks beat the closing price` : "Measured from the market's closing price", cls(s.clv_avg))}
+    ${kpi("Your bets", bn ? `${r.bw}-${r.bl}` : "–", bn ? `${sgn(r.bunits)}u at your Hard Rock prices` : "Reply in Telegram to log", cls(r.bunits))}
+  </div>`;
+  const form = s.last10 ? `<span class="form">${[...s.last10].map(c => `<b class="${c}">${c}</b>`).join("")}</span>` : `<span class="muted">–</span>`;
+  const chart = `<section class="card"><h3>Profit over time <span>cumulative units, settled picks in order</span></h3>
+    <div class="chart">${curveChart(s.curve)}</div></section>`;
+  const days = s.by_day.length ? `<div class="scroll"><table><thead><tr><th>Day</th><th class="r">W-L</th><th class="r">Hit rate</th><th class="r">Units</th></tr></thead><tbody>
+      ${s.by_day.map(x => `<tr><td>${esc(x.date)}</td><td class="r num">${x.w}-${x.l}</td><td class="r num">${pct(x.w / (x.w + x.l))}</td>
+        <td class="r num ${cls(x.units)}">${sgn(x.units)}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">No settled picks yet.</div>`;
+  const splits = Object.entries(s.buckets).map(([k, b]) => `<div><div class="row"><span>${esc(k)}</span>
+      <span class="num">${b.n ? `${b.w}-${b.l} · ${pct(b.hit)} · <span class="${cls(b.units)}">${sgn(b.units)}u</span>` : "–"}</span></div>
+      <div class="bar"><i style="width:${b.hit == null ? 0 : (b.hit * 100).toFixed(0)}%"></i></div></div>`).join("");
+  const mt = d.model_test || {};
+  const statsCard = `<section class="grid two">
+    <div class="card"><h3>Results by day <span>last 14 days</span></h3>${days}</div>
+    <div class="card"><h3>Stats</h3><div class="split">
+      <div class="row"><span>Last 10</span>${form}</div>
+      <div class="row"><span>Current streak</span><span class="num">${esc(s.streak || "–")}</span></div>
+      <div class="row"><span>Picks sent</span><span class="num">${s.total}</span></div>
+      <div class="row"><span>Average minimum price</span><span class="num">${am(s.avg_min_price)}</span></div>
+      <div class="row"><span>Hard Rock at/above minimum</span><span class="num">${r.logged ? `${r.beat} of ${r.logged}` : "–"}</span></div>
+      ${splits}
+      <div class="row"><span>Model</span><span class="num muted">${esc(d.model || "–")}</span></div>
+      <div class="row"><span>Model test accuracy</span><span class="num">${pct(mt.accuracy, 1)}</span></div>
+      <div class="row"><span>Matches in history</span><span class="num">${(d.matches_in_history || 0).toLocaleString()}</span></div>
+    </div></div></section>`;
+  const picks = d.picks.length ? `<div class="scroll"><table><thead><tr><th>Match time</th><th>Pick</th><th>Match</th><th class="r">Win %</th>
+      <th class="r">Minimum</th><th class="r">Hard Rock</th><th>Score</th><th>Result</th><th class="r">Units</th></tr></thead><tbody>
+      ${d.picks.map(p => `<tr><td>${esc(p.match_time)}</td><td><b>${esc(p.pick)}</b></td><td class="muted">${esc(p.match)}</td>
+        <td class="r num">${pct(p.prob)}</td><td class="r num">${am(p.min)}</td>
+        <td class="r num">${p.hr_action ? (p.hr_action === "skip" ? "skipped" : am(p.hr_price) + (p.hr_action === "bet" ? " · bet" : "")) : (p.hr_auto != null ? am(p.hr_auto) + " · live" : "–")}</td>
+        <td class="num">${esc(p.score || "–")}</td>
+        <td><span class="chip ${p.result === "won" ? "won" : p.result === "lost" ? "lost" : ""}">${p.result === "won" ? "✓ " : p.result === "lost" ? "✕ " : ""}${esc(p.result)}</span></td>
+        <td class="r num ${cls(p.units)}">${p.units == null ? "–" : sgn(p.units)}</td></tr>`).join("")}</tbody></table></div>`
+    : `<div class="empty">No picks sent yet.</div>`;
+  const up = d.upcoming.length ? `<div class="scroll"><table><thead><tr><th>Time</th><th>Match</th><th>Model lean</th><th class="r">Worth it at</th><th>Status</th></tr></thead><tbody>
+      ${d.upcoming.map(u => `<tr><td>${esc(u.time)}</td><td>${esc(u.p1)} <span class="muted">vs</span> ${esc(u.p2)}</td>
+        <td>${u.lean ? `${esc(u.lean)} <span class="muted num">${pct(u.lean_prob, 1)}</span>` : "–"}</td>
+        <td class="r num">${u.min_price != null ? am(u.min_price) + " or better" : "–"}</td>
+        <td><span class="chip ${u.status === "passes rules" ? "pass" : ""}">${esc(u.status)}</span></td></tr>`).join("")}</tbody></table></div>`
+    : `<div class="empty">No matches in the next 3 hours.</div>`;
+  const L = d.learning || {}, last = L.last;
+  const learnCard = `<section class="card"><h3>Bot learning <span>daily self-check against real results</span></h3>
+    ${last ? `<div class="split">
+      <div class="row"><span>Pick rule now</span><span class="num"><b>favorites at ${pct(d.rules.min_prob)}+</b></span></div>
+      <div class="row"><span>Last check (${esc(last.date)})</span><span class="muted">${esc(last.note)}</span></div>
+      <div class="scroll"><table><thead><tr><th>Model favorites at</th><th class="r">Matches</th><th class="r">Predicted</th><th class="r">Actually won</th><th class="r">Gap</th></tr></thead><tbody>
+        ${last.table.filter(r => r.n).map(r => `<tr><td>${pct(r.min_prob)}+</td><td class="r num">${r.n}</td><td class="r num">${pct(r.predicted, 1)}</td>
+          <td class="r num">${pct(r.actual, 1)}</td><td class="r num ${cls(r.actual - r.predicted)}">${sgn((r.actual - r.predicted) * 100, 1)} pts</td></tr>`).join("")}
+      </tbody></table></div>
+      ${L.history.length > 1 ? `<div class="muted" style="font-size:12px">${L.history.slice(1).map(h => `${esc(h.date)}: ${esc(h.note)}`).join("<br>")}</div>` : ""}
+    </div>` : `<div class="empty">The first daily check runs today; it compares the model's predictions with real results.</div>`}</section>`;
+  const M = d.market || {usage: {}, checks: []}, U = M.usage;
+  const mkCard = `<section class="card"><h3>Hard Rock market checks <span>OddsPapi credits: ${U.this_month ?? 0} of ${U.monthly_cap ?? "–"} this month · ${U.today ?? 0} of ${U.daily_cap ?? "–"} today</span></h3>
+    ${M.checks.length ? `<div class="scroll"><table><thead><tr><th>Checked</th><th>Pick</th><th class="r">Model</th><th class="r">Minimum</th>
+      <th class="r">Hard Rock</th><th class="r">Market fair</th><th class="r">Edge vs market</th><th>Decision</th></tr></thead><tbody>
+      ${M.checks.map(c => `<tr><td class="muted">${esc((c.at || "").slice(11, 16))} UTC</td><td><b>${esc(c.pick)}</b> <span class="muted">${esc(c.match)}</span></td>
+        <td class="r num">${pct(c.p)}</td><td class="r num">${am(c.min_american)}</td><td class="r num">${am(c.hr_american)}</td>
+        <td class="r num">${c.consensus_p ? pct(c.consensus_p, 1) + (c.books ? ` · ${c.books} books` : "") : "–"}</td>
+        <td class="r num ${cls(c.market_ev_at_hr)}">${c.market_ev_at_hr == null ? "–" : sgn(c.market_ev_at_hr * 100, 1) + "%"}</td>
+        <td><span class="chip ${c.sent ? "pass" : ""}">${c.sent ? "sent" : "skipped"}</span> <span class="muted">${esc(c.reason || c.market || "")}</span></td></tr>`).join("")}
+      </tbody></table></div>` : `<div class="empty">No market checks yet. Each pick candidate is checked against Hard Rock's live price.</div>`}</section>`;
+  $("#app").innerHTML = `${head}<main>${kpis}${chart}${statsCard}${mkCard}${learnCard}
+    <section class="card"><h3>Picks sent <span>${s.total} total</span></h3>${picks}</section>
+    <section class="card"><h3>Next 3 hours <span>${d.upcoming_passing || 0} passing the rules right now</span></h3>${up}</section>
+    <div class="foot">Picks are graded at the minimum price in each Telegram message, 1 unit each; a better Hard Rock price only improves this.
+      "Your bets" uses the prices you reply with in Telegram. Model estimates, not guarantees; judge it over hundreds of picks.
+      Refreshes about every 10 minutes. <a class="link" id="out">Sign out on this device</a></div></main>`;
+  $("#out").onclick = () => { try { localStorage.removeItem("ttq_pw"); } catch (e) {} location.reload(); };
+  wireChart();
+  window.__last = d;
+}
+let rz; window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => window.__last && render(window.__last), 200); });
+
+async function openDash(pw, remember) {
+  const res = await fetch("data.json?t=" + Date.now(), {cache: "no-store"});
+  const data = await decrypt(await res.json(), pw);
+  if (remember) { try { localStorage.setItem("ttq_pw", pw); } catch (e) {} }
+  render(data);
+}
+
+$("#login").addEventListener("submit", async e => {
+  e.preventDefault(); $("#err").textContent = "";
+  try { await openDash($("#pw").value, true); } catch (err) { $("#err").textContent = "Wrong password, or the page is updating. Try again."; }
+});
+
+(async () => {
+  let saved = null;
+  try { saved = localStorage.getItem("ttq_pw"); } catch (e) {}
+  if (saved) { try { await openDash(saved, false); } catch (e) { try { localStorage.removeItem("ttq_pw"); } catch (_) {} } }
+})();
+</script>
+</body>
+</html>
