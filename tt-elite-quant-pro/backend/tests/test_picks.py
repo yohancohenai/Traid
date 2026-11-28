@@ -189,3 +189,38 @@ def test_hard_rock_missing_waits_then_any_match_is_checked(f, db, monkeypatch):
     _market(monkeypatch, {"status": "ok", "books": 1, "hard_rock": (2.20, 1.62), "consensus_p1": 0.5})
     r = picks_job(db)
     assert r["sent"] == 1 and len(sent) == 1
+
+
+def test_prequalified_pick_is_verified_with_real_hard_rock(f, db, monkeypatch):
+    _setup(db)
+    monkeypatch.setenv("ODDSPAPI_NO_HR_PICKS", "1")
+    m = _m(f, db, 20, p1=0.64, names=("Szymon Brud", "Rafal Stapor"))
+    sent = []
+    monkeypatch.setattr("ttq.services.alerts._send_telegram", lambda t, b: sent.append(b) or True)
+    monkeypatch.setattr("ttq.services.alerts._send_email", lambda t, b: False)
+    # DraftKings board: Brud -150 / +125 -> fair ~58%; blend ~61% -> pre-qualified
+    _market(monkeypatch, {"status": "ok", "books": 1, "hard_rock": None, "consensus_p1": 0.58,
+                          "refs": {"draftkings": (1.67, 2.25)}})
+    calls = []
+    def mc(db, *a, **k):
+        calls.append(1)
+        return {"status": "ok", "books": 6, "hard_rock": (1.80, 2.00), "consensus_p1": 0.58, "fixture_id": "f1",
+                "flipped": False}
+    monkeypatch.setattr("ttq.providers.oddspapi.market_check", mc)
+    r = picks_job(db)
+    assert r["sent"] == 1 and calls == [1]
+    assert "Hard Rock now" in sent[0] and "(-125)" in sent[0]
+
+
+def test_prequalified_but_hard_rock_not_offering_sends_nothing(f, db, monkeypatch):
+    _setup(db)
+    monkeypatch.setenv("ODDSPAPI_NO_HR_PICKS", "1")
+    _m(f, db, 20, p1=0.64)
+    sent = []
+    monkeypatch.setattr("ttq.services.alerts._send_telegram", lambda t, b: sent.append(b) or True)
+    _market(monkeypatch, {"status": "ok", "books": 1, "hard_rock": None, "consensus_p1": 0.58,
+                          "refs": {"draftkings": (1.67, 2.25)}})
+    monkeypatch.setattr("ttq.providers.oddspapi.market_check",
+                        lambda db, *a, **k: {"status": "ok", "books": 6, "hard_rock": None, "consensus_p1": 0.58})
+    r = picks_job(db)
+    assert r["sent"] == 0 and not sent and "Hard Rock isn't offering" in r["skipped_by_market"][0]["reason"]

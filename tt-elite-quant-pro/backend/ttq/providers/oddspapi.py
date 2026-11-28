@@ -206,9 +206,12 @@ def market_check(db: Session, p1_name: str, p2_name: str, start: datetime, now: 
     if flipped:
         pairs = {k: (b, a) for k, (a, b) in pairs.items()}
     hr = pairs.get(HARD_ROCK)
-    cons = consensus_p1(pairs)
-    return {"status": "ok", "books": len(pairs), "hard_rock": hr, "consensus_p1": cons, "fixture_id": f["fixtureId"],
-            "flipped": flipped}
+    refs = {k: v for k, v in pairs.items() if k != HARD_ROCK}
+    cons = consensus_p1(refs)
+    if cons is None and refs:                       # fewer than 3 distinct books: use what there is
+        cons, _ = fair_p1(refs, list(refs))
+    return {"status": "ok", "books": len(refs), "hard_rock": hr, "consensus_p1": cons, "fixture_id": f["fixtureId"],
+            "flipped": flipped, "refs": refs}
 
 
 def board_by_fixture(db: Session, fixture_id: str, flipped: bool, now: datetime | None = None) -> dict | None:
@@ -288,8 +291,9 @@ def sweep(db: Session, now: datetime | None = None, force: bool = False, need: b
     cache = _get_row(db, "oddspapi_fixtures")
     fx_fresh = cache.get("fetched_at") and now - datetime.fromisoformat(cache["fetched_at"]) < FIXTURE_REFRESH
     cost = len(books) + (0 if fx_fresh else 1)
-    if not can_spend(db, cost, now):
-        return {"swept": False, "why": f"budget (needs {cost})"}
+    reserve = int(os.environ.get("ODDSPAPI_VERIFY_RESERVE", "0")) if need else 0
+    if not can_spend(db, cost + reserve, now):
+        return {"swept": False, "why": f"budget (needs {cost}, keeping {reserve} for Hard Rock checks)"}
     names = {f["fixtureId"]: f for f in fixtures(db, now + timedelta(hours=2), now)} if not fx_fresh else \
         {f["fixtureId"]: f for f in cache.get("fixtures", [])}
     boards: dict[str, dict] = {}

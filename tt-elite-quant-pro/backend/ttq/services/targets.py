@@ -216,7 +216,7 @@ def _sides(pred, p_fav: float, fav_side: str) -> list[tuple[str, float, float]]:
 
 
 def decide_with_market(side: str, p: float, min_american: int, mk: dict | None, pred=None,
-                       F: dict | None = None) -> tuple[bool, dict]:
+                       F: dict | None = None, allow_no_hr: bool = True) -> tuple[bool, dict]:
     """A pick is sent only when the live market confirms a mispriced Hard Rock line:
     Hard Rock's price is in the -200..+200 band, the model has >= min_ev at that price (and >= min_ev_low at the low
     end of its range), and the consensus of the other books also says +EV. Either side of the match can qualify;
@@ -234,7 +234,7 @@ def decide_with_market(side: str, p: float, min_american: int, mk: dict | None, 
     F = F or {"min_ev": 0.03, "min_ev_low": 0.0}
     if not hr:
         import os
-        if os.environ.get("ODDSPAPI_NO_HR_PICKS", "0") == "1":
+        if allow_no_hr and os.environ.get("ODDSPAPI_NO_HR_PICKS", "0") == "1":
             return _decide_without_hr(p, side, pred, cons_p1, mk, F, info)
         info["reason"] = "Hard Rock hasn't listed it yet"
         info["hr_missing"] = True
@@ -389,6 +389,9 @@ def _log_market_check(db: Session, row: dict) -> None:
 
 SWEEP_WINDOW_MIN = 90
 MARKET_WINDOW_MIN = 45    # Hard Rock lists TT Elite late: matches are checked from 45 min before start
+import os as _os
+VERIFY_HR = _os.environ.get("ODDSPAPI_VERIFY_HR", "1") == "1"
+VERIFY_LEAD_MIN = int(_os.environ.get("ODDSPAPI_VERIFY_LEAD_MINUTES", "25"))
 
 
 def picks_job(db: Session) -> dict:
@@ -408,7 +411,7 @@ def picks_job(db: Session) -> dict:
         names = (m.player1.canonical_name, m.player2.canonical_name, m.scheduled_at)
         try:
             mk = from_sweep(db, *names)
-            if (mk.get("status") != "ok" or not mk.get("hard_rock")) and not resweep_tried:
+            if mk.get("status") != "ok" and not resweep_tried:
                 resweep_tried = True            # fresh Hard Rock + DraftKings boards for everything starting soon
                 r = sweep(db, need=True)
                 if r.get("swept"):
@@ -421,6 +424,25 @@ def picks_job(db: Session) -> dict:
         if (info.get("market") in ("no fresh sweep", "not in sweep", "error") or info.get("hr_missing")) and mins_left > 12:
             unmark.append(m.id)             # nothing decided yet: look again on a later run / sweep
             continue
+        if send and info.get("hr_listed") is False and VERIFY_HR:
+            # Pre-qualified on DraftKings. Confirm with Hard Rock's real price (1 credit, all books) shortly before
+            # start, and send only if Hard Rock itself is mispriced: every pick carries the real Hard Rock line.
+            if mins_left > VERIFY_LEAD_MIN:
+                unmark.append(m.id)
+                continue
+            from ttq.providers.oddspapi import market_check
+            try:
+                mk = market_check(db, *names) or {"status": "error"}
+            except Exception:  # noqa
+                mk = {"status": "error"}
+            if mk.get("status") == "no_budget" and mins_left > 12:
+                unmark.append(m.id)
+                continue
+            send, info = decide_with_market(pk["side"], pk["p"], pk["min_american"], mk, pk["pred"],
+                                            get_filters(db, False), allow_no_hr=False)
+            info["verified"] = True
+            if info.get("hr_missing"):
+                info["reason"] = "Hard Rock isn't offering this match (checked live), so no pick"
         if send and info.get("hr_listed") is False:
             pk = {**pk, "side": info["side"], "p": info["p"], "min_american": info["min_american"]}
         elif send:          # real Hard Rock line: the floor is the lowest price still 2%+ above the market's fair price
