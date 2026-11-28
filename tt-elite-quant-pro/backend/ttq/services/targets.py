@@ -274,6 +274,10 @@ def decide_with_market(side: str, p: float, min_american: int, mk: dict | None, 
                      "market_ev_at_hr": round((cons_p1 if sd == "p1" else 1 - cons_p1) * dec - 1, 4)})
         return False, info
     info.update(best)
+    refs = mk.get("refs") or {}
+    if refs:          # the best price anywhere else, for context (the fair price uses every book)
+        bk, pr = max(((k, v[0] if best["side"] == "p1" else v[1]) for k, v in refs.items()), key=lambda x: x[1])
+        info["best_other"] = [bk, decimal_to_american(pr)]
     info["reason"] = "misplaced Hard Rock line: Hard Rock pays more than the fair price of the other books"
     return True, info
 
